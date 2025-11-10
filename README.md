@@ -1,6 +1,19 @@
 # WhatsApp Desktop Container
 
+<div align="center">
+
+![Electron](https://img.shields.io/badge/Electron-39.1.1-47848F?style=for-the-badge&logo=electron&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=for-the-badge&logo=node.js&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)
+
 基于 whatsapp-web.js 的容器化 WhatsApp 桌面应用程序。
+
+[功能特性](#核心特性) • [快速开始](#快速开始) • [文档](#文档) • [测试](#测试)
+
+</div>
+
+---
 
 ## 项目概述
 
@@ -208,9 +221,50 @@ shm_size: 2gb
 
 MIT
 
-## 贡献
+## 📂 项目结构
+
+```
+whatsapp-desktop-container/
+├── src/
+│   ├── main.js              # Electron 主进程
+│   └── config.js            # 配置文件
+├── scripts/                 # 测试和工具脚本
+│   ├── test-setup.js
+│   ├── check-session.js
+│   ├── test-reconnect.js
+│   ├── clean-session.js
+│   └── check-electron-version.js
+├── docker/
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── resources/               # 应用资源
+├── .kiro/specs/            # 项目规范文档
+├── docs/                    # 文档目录
+│   ├── TESTING_GUIDE.md
+│   ├── SECURITY_BEST_PRACTICES.md
+│   ├── CONSOLE_ERRORS_EXPLAINED.md
+│   └── UPGRADE_NOTES.md
+└── package.json
+```
+
+## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
+
+### 贡献指南
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+### 开发规范
+
+- 遵循现有代码风格
+- 添加适当的注释
+- 更新相关文档
+- 运行测试确保功能正常
 
 ## 安全性说明
 
