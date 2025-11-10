@@ -1,0 +1,29 @@
+# Dependencies (will be installed in container)
+node_modules/
+
+# Session data (will be mounted as volume)
+session-data/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Build output
+dist/
+build/
+out/
+
+# Logs
+*.log
+
+# Development files
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Documentation
+README.md
+.kiro/
+
+# OS files
+.DS_Store
+Thumbs.db

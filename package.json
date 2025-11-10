@@ -1,0 +1,56 @@
+{
+  "name": "whatsapp-desktop-container",
+  "version": "1.0.0",
+  "description": "WhatsApp Desktop application with containerization support",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --inspect",
+    "build": "electron-builder",
+    "version": "node scripts/check-electron-version.js",
+    "test:setup": "node scripts/test-setup.js",
+    "test:session": "node scripts/check-session.js",
+    "test:reconnect": "node scripts/test-reconnect.js",
+    "test:clean": "node scripts/clean-session.js",
+    "docker:build": "docker build -t whatsapp-desktop .",
+    "docker:run": "docker-compose up -d",
+    "docker:logs": "docker-compose logs -f",
+    "docker:stop": "docker-compose down"
+  },
+  "keywords": [
+    "whatsapp",
+    "electron",
+    "desktop",
+    "docker",
+    "container"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0"
+  },
+  "devDependencies": {
+    "electron": "^39.1.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.whatsapp.desktop",
+    "productName": "WhatsApp Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "resources/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

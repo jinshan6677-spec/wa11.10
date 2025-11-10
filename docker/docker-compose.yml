@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  whatsapp-desktop:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: whatsapp-desktop
+    volumes:
+      # 持久化会话数据
+      - whatsapp-session:/data/session
+    environment:
+      - SESSION_PATH=/data/session
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    # Chromium 需要足够的共享内存
+    shm_size: 2gb
+    # 安全配置
+    security_opt:
+      - seccomp:unconfined
+
+volumes:
+  whatsapp-session:
+    driver: local
