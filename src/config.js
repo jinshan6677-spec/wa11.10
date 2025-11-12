@@ -14,7 +14,8 @@ module.exports = {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      preload: require('path').join(__dirname, 'preload.js')
     }
   },
   

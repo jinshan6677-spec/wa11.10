@@ -27,7 +27,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "whatsapp-web.js": "^1.23.0"
+    "whatsapp-web.js": "^1.23.0",
+    "electron-store": "^8.1.0",
+    "lru-cache": "^10.0.0"
   },
   "devDependencies": {
     "electron": "^39.1.1",

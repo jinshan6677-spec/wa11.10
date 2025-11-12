@@ -9,11 +9,39 @@ const { app, BrowserWindow } = require('electron');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const config = require('./config');
 const path = require('path');
+const translationService = require('./translation/translationService');
+const { registerIPCHandlers, unregisterIPCHandlers } = require('./translation/ipcHandlers');
 
 // 全局变量
 let mainWindow = null;
 let client = null;
 let reconnectAttempts = 0;
+
+/**
+ * 注入翻译内容脚本
+ */
+function injectTranslationScript() {
+  if (!mainWindow || !mainWindow.webContents) {
+    log('error', '无法注入翻译脚本：窗口不存在');
+    return;
+  }
+
+  try {
+    const fs = require('fs');
+    const scriptPath = path.join(__dirname, 'translation', 'contentScript.js');
+    const scriptContent = fs.readFileSync(scriptPath, 'utf8');
+
+    mainWindow.webContents.executeJavaScript(scriptContent)
+      .then(() => {
+        log('info', '翻译脚本注入成功');
+      })
+      .catch((error) => {
+        log('error', '翻译脚本注入失败:', error);
+      });
+  } catch (error) {
+    log('error', '读取翻译脚本失败:', error);
+  }
+}
 
 /**
  * 日志记录函数
@@ -57,6 +85,12 @@ function createWindow() {
   // 加载 WhatsApp Web
   log('info', '加载 WhatsApp Web...');
   mainWindow.loadURL('https://web.whatsapp.com');
+
+  // 注入翻译内容脚本
+  mainWindow.webContents.on('did-finish-load', () => {
+    log('info', 'WhatsApp Web 加载完成，注入翻译脚本...');
+    injectTranslationScript();
+  });
 
   // 过滤 WhatsApp Web 的内部错误（可选）
   // 这些错误来自 WhatsApp 自己的代码，不影响功能
@@ -203,6 +237,22 @@ async function cleanup() {
     }
   }
 
+  // 注销 IPC 处理器
+  try {
+    unregisterIPCHandlers();
+    log('info', 'IPC 处理器已注销');
+  } catch (error) {
+    log('error', '注销 IPC 处理器时出错:', error);
+  }
+
+  // 清理翻译服务
+  try {
+    await translationService.cleanup();
+    log('info', '翻译服务已清理');
+  } catch (error) {
+    log('error', '清理翻译服务时出错:', error);
+  }
+
   log('info', '资源清理完成');
 }
 
@@ -213,6 +263,23 @@ app.whenReady().then(async () => {
   log('info', 'Electron 应用已就绪');
 
   try {
+    // 初始化翻译服务
+    try {
+      await translationService.initialize();
+      log('info', '翻译服务初始化完成');
+    } catch (error) {
+      log('error', '翻译服务初始化失败:', error);
+      log('error', '错误堆栈:', error.stack);
+    }
+
+    // 注册 IPC 处理器
+    try {
+      registerIPCHandlers();
+      log('info', 'IPC 处理器注册完成');
+    } catch (error) {
+      log('error', 'IPC 处理器注册失败:', error);
+    }
+
     // 创建窗口
     createWindow();
 
@@ -221,6 +288,7 @@ app.whenReady().then(async () => {
 
   } catch (error) {
     log('error', '应用启动失败:', error);
+    log('error', '错误堆栈:', error.stack);
     app.quit();
   }
 
