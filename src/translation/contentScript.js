@@ -389,19 +389,13 @@
       const detectedLang = result.detectedLang || 'auto';
       const targetLang = this.config.global.targetLang;
       
-      // 添加反向翻译按钮（如果启用）
-      const reverseBtn = this.config.advanced.reverseTranslation ? 
-        '<button class="wa-reverse-translate-btn" title="反向翻译验证">🔄</button>' : '';
-      
       translationDiv.innerHTML = `
         <div class="translation-header">
           <span class="translation-icon">🌐</span>
           <span class="translation-lang">${detectedLang} → ${targetLang}</span>
           ${result.cached ? '<span class="translation-cached">📦</span>' : ''}
-          ${reverseBtn}
         </div>
         <div class="translation-text">${this.escapeHtml(result.translatedText)}</div>
-        <div class="reverse-translation-container" style="display: none;"></div>
       `;
 
       // 找到消息内容容器
@@ -415,167 +409,9 @@
       } else {
         messageNode.appendChild(translationDiv);
       }
-      
-      // 绑定反向翻译按钮事件
-      if (this.config.advanced.reverseTranslation) {
-        const reverseBtnEl = translationDiv.querySelector('.wa-reverse-translate-btn');
-        if (reverseBtnEl) {
-          reverseBtnEl.onclick = () => {
-            this.performReverseTranslation(messageNode, result.translatedText, detectedLang);
-          };
-        }
-      }
     },
 
-    /**
-     * 执行反向翻译
-     */
-    async performReverseTranslation(messageNode, translatedText, originalLang) {
-      try {
-        const translationDiv = messageNode.querySelector('.wa-translation-result');
-        if (!translationDiv) return;
-        
-        const reverseContainer = translationDiv.querySelector('.reverse-translation-container');
-        if (!reverseContainer) return;
-        
-        // 显示加载状态
-        reverseContainer.style.display = 'block';
-        reverseContainer.innerHTML = `
-          <div class="reverse-translation-header">
-            <span class="translation-icon">🔄</span>
-            <span>反向翻译验证中...</span>
-          </div>
-        `;
-        
-        // 获取原文
-        const textElement = messageNode.querySelector('.selectable-text[dir="ltr"], .selectable-text[dir="rtl"]') ||
-                           messageNode.querySelector('.selectable-text');
-        const originalText = textElement ? textElement.textContent.trim() : '';
-        
-        if (!originalText) {
-          reverseContainer.innerHTML = `
-            <div class="reverse-translation-error">
-              <span class="translation-icon">⚠️</span>
-              <span>无法获取原文</span>
-            </div>
-          `;
-          return;
-        }
-        
-        // 执行反向翻译
-        const response = await window.translationAPI.translate({
-          text: translatedText,
-          sourceLang: this.config.global.targetLang,
-          targetLang: originalLang || 'auto',
-          engineName: this.config.global.engine,
-          options: {}
-        });
-        
-        if (response.success) {
-          const reverseText = response.data.translatedText;
-          
-          // 计算相似度
-          const similarity = this.calculateSimilarity(originalText, reverseText);
-          const similarityPercent = Math.round(similarity * 100);
-          
-          // 判断是否需要警告
-          const needsWarning = similarityPercent < 70;
-          
-          reverseContainer.innerHTML = `
-            <div class="reverse-translation-header">
-              <span class="translation-icon">🔄</span>
-              <span>反向翻译验证</span>
-              <span class="similarity-badge ${needsWarning ? 'warning' : 'good'}">
-                相似度: ${similarityPercent}%
-              </span>
-            </div>
-            <div class="reverse-comparison">
-              <div class="comparison-item">
-                <div class="comparison-label">原文:</div>
-                <div class="comparison-text">${this.escapeHtml(originalText)}</div>
-              </div>
-              <div class="comparison-item">
-                <div class="comparison-label">反向翻译:</div>
-                <div class="comparison-text">${this.escapeHtml(reverseText)}</div>
-              </div>
-            </div>
-            ${needsWarning ? '<div class="reverse-warning">⚠️ 相似度较低，翻译可能不够准确</div>' : ''}
-          `;
-        } else {
-          reverseContainer.innerHTML = `
-            <div class="reverse-translation-error">
-              <span class="translation-icon">⚠️</span>
-              <span>反向翻译失败: ${response.error}</span>
-            </div>
-          `;
-        }
-      } catch (error) {
-        console.error('[Translation] Reverse translation error:', error);
-        const reverseContainer = messageNode.querySelector('.reverse-translation-container');
-        if (reverseContainer) {
-          reverseContainer.innerHTML = `
-            <div class="reverse-translation-error">
-              <span class="translation-icon">⚠️</span>
-              <span>反向翻译失败: ${error.message}</span>
-            </div>
-          `;
-        }
-      }
-    },
 
-    /**
-     * 计算两个文本的相似度（简单的 Levenshtein 距离）
-     */
-    calculateSimilarity(text1, text2) {
-      // 转换为小写并去除标点符号
-      const normalize = (text) => {
-        return text.toLowerCase()
-          .replace(/[^\w\s\u4e00-\u9fa5]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-      };
-      
-      const s1 = normalize(text1);
-      const s2 = normalize(text2);
-      
-      // 如果完全相同
-      if (s1 === s2) return 1.0;
-      
-      // 计算 Levenshtein 距离
-      const len1 = s1.length;
-      const len2 = s2.length;
-      
-      if (len1 === 0) return len2 === 0 ? 1.0 : 0.0;
-      if (len2 === 0) return 0.0;
-      
-      const matrix = [];
-      
-      // 初始化矩阵
-      for (let i = 0; i <= len1; i++) {
-        matrix[i] = [i];
-      }
-      for (let j = 0; j <= len2; j++) {
-        matrix[0][j] = j;
-      }
-      
-      // 填充矩阵
-      for (let i = 1; i <= len1; i++) {
-        for (let j = 1; j <= len2; j++) {
-          const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j] + 1,      // 删除
-            matrix[i][j - 1] + 1,      // 插入
-            matrix[i - 1][j - 1] + cost // 替换
-          );
-        }
-      }
-      
-      const distance = matrix[len1][len2];
-      const maxLen = Math.max(len1, len2);
-      
-      // 返回相似度（0-1）
-      return 1 - (distance / maxLen);
-    },
 
     /**
      * 显示错误信息
@@ -1936,15 +1772,84 @@
      * 检测是否主要是中文
      */
     isChinese(text) {
+      // 检测日语假名（平假名和片假名）
+      const hasHiragana = /[\u3040-\u309f]/.test(text);
+      const hasKatakana = /[\u30a0-\u30ff]/.test(text);
+      
+      // 如果包含日语假名，肯定不是纯中文
+      if (hasHiragana || hasKatakana) {
+        return false;
+      }
+      
+      // 检测韩文
+      const hasKorean = /[\uac00-\ud7af]/.test(text);
+      if (hasKorean) {
+        return false;
+      }
+      
       // 统计中文字符数量
       const chineseChars = text.match(/[\u4e00-\u9fa5]/g);
       const chineseCount = chineseChars ? chineseChars.length : 0;
       
-      // 如果中文字符超过30%，认为是中文消息
+      // 如果中文字符超过50%，认为是中文消息
       const totalChars = text.replace(/\s/g, '').length;
       const chineseRatio = totalChars > 0 ? chineseCount / totalChars : 0;
       
-      return chineseRatio > 0.3;
+      return chineseRatio > 0.5;
+    },
+
+    /**
+     * 计算两个文本的相似度（用于反向翻译验证）
+     */
+    calculateSimilarity(text1, text2) {
+      // 转换为小写并去除标点符号
+      const normalize = (text) => {
+        return text.toLowerCase()
+          .replace(/[^\w\s\u4e00-\u9fa5]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+      
+      const s1 = normalize(text1);
+      const s2 = normalize(text2);
+      
+      // 如果完全相同
+      if (s1 === s2) return 1.0;
+      
+      // 计算 Levenshtein 距离
+      const len1 = s1.length;
+      const len2 = s2.length;
+      
+      if (len1 === 0) return len2 === 0 ? 1.0 : 0.0;
+      if (len2 === 0) return 0.0;
+      
+      const matrix = [];
+      
+      // 初始化矩阵
+      for (let i = 0; i <= len1; i++) {
+        matrix[i] = [i];
+      }
+      for (let j = 0; j <= len2; j++) {
+        matrix[0][j] = j;
+      }
+      
+      // 填充矩阵
+      for (let i = 1; i <= len1; i++) {
+        for (let j = 1; j <= len2; j++) {
+          const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j] + 1,      // 删除
+            matrix[i][j - 1] + 1,      // 插入
+            matrix[i - 1][j - 1] + cost // 替换
+          );
+        }
+      }
+      
+      const distance = matrix[len1][len2];
+      const maxLen = Math.max(len1, len2);
+      
+      // 返回相似度（0-1）
+      return 1 - (distance / maxLen);
     },
 
     /**
@@ -2198,31 +2103,7 @@
           font-style: italic;
         }
 
-        /* 反向翻译按钮 */
-        .wa-reverse-translate-btn {
-          background: transparent;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          border-radius: 4px;
-          padding: 2px 8px;
-          font-size: 12px;
-          cursor: pointer;
-          margin-left: auto;
-          transition: all 0.2s;
-        }
 
-        .wa-reverse-translate-btn:hover {
-          background: rgba(0, 0, 0, 0.05);
-          transform: scale(1.05);
-        }
-
-        /* 反向翻译容器 */
-        .reverse-translation-container {
-          margin-top: 12px;
-          padding: 12px;
-          background: rgba(156, 39, 176, 0.05);
-          border-left: 3px solid #9c27b0;
-          border-radius: 8px;
-        }
 
         /* 输入框反向翻译样式 */
         .wa-input-reverse-translation {
@@ -2322,78 +2203,7 @@
           font-size: 12px;
         }
 
-        .reverse-translation-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 8px;
-          font-size: 12px;
-          color: #9c27b0;
-          font-weight: 500;
-        }
 
-        .similarity-badge {
-          margin-left: auto;
-          padding: 2px 8px;
-          border-radius: 12px;
-          font-size: 11px;
-          font-weight: 600;
-        }
-
-        .similarity-badge.good {
-          background: #4caf50;
-          color: white;
-        }
-
-        .similarity-badge.warning {
-          background: #ff9800;
-          color: white;
-        }
-
-        .reverse-comparison {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .comparison-item {
-          background: rgba(255, 255, 255, 0.5);
-          padding: 8px;
-          border-radius: 4px;
-        }
-
-        .comparison-label {
-          font-size: 11px;
-          color: #667781;
-          font-weight: 600;
-          margin-bottom: 4px;
-        }
-
-        .comparison-text {
-          font-size: 13px;
-          color: #111b21;
-          line-height: 1.4;
-        }
-
-        .reverse-warning {
-          margin-top: 8px;
-          padding: 8px;
-          background: rgba(255, 152, 0, 0.1);
-          border-radius: 4px;
-          font-size: 12px;
-          color: #f57c00;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .reverse-translation-error {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: #ef4444;
-          font-size: 12px;
-        }
 
         /* 深色模式支持 */
         [data-theme="dark"] .wa-translation-result {
@@ -2956,18 +2766,54 @@
               <div class="setting-item">
                 <label class="setting-title">目标语言</label>
                 <select id="targetLanguage" class="setting-select">
-                  <option value="zh-CN">中文简体</option>
-                  <option value="zh-TW">中文繁体</option>
-                  <option value="en">English</option>
-                  <option value="ja">日本語</option>
-                  <option value="ko">한국어</option>
-                  <option value="es">Español</option>
-                  <option value="fr">Français</option>
-                  <option value="de">Deutsch</option>
-                  <option value="ru">Русский</option>
-                  <option value="ar">العربية</option>
-                  <option value="pt">Português</option>
-                  <option value="it">Italiano</option>
+                  <option value="zh-CN">🇨🇳 中文简体</option>
+                  <option value="zh-TW">🇹🇼 中文繁体</option>
+                  <option value="en">🇬🇧 英语</option>
+                  <option value="vi">🇻🇳 越南语</option>
+                  <option value="ja">🇯🇵 日语</option>
+                  <option value="ko">🇰🇷 韩语</option>
+                  <option value="th">🇹🇭 泰语</option>
+                  <option value="id">🇮🇩 印尼语</option>
+                  <option value="ms">🇲🇾 马来语</option>
+                  <option value="tl">🇵🇭 菲律宾语</option>
+                  <option value="my">🇲🇲 缅甸语</option>
+                  <option value="km">🇰🇭 高棉语</option>
+                  <option value="lo">🇱🇦 老挝语</option>
+                  <option value="es">🇪🇸 西班牙语</option>
+                  <option value="fr">🇫🇷 法语</option>
+                  <option value="de">🇩🇪 德语</option>
+                  <option value="it">🇮🇹 意大利语</option>
+                  <option value="pt">🇵🇹 葡萄牙语</option>
+                  <option value="ru">🇷🇺 俄语</option>
+                  <option value="ar">🇸🇦 阿拉伯语</option>
+                  <option value="hi">🇮🇳 印地语</option>
+                  <option value="bn">🇧🇩 孟加拉语</option>
+                  <option value="ur">🇵🇰 乌尔都语</option>
+                  <option value="tr">🇹🇷 土耳其语</option>
+                  <option value="fa">🇮🇷 波斯语</option>
+                  <option value="he">🇮🇱 希伯来语</option>
+                  <option value="nl">🇳🇱 荷兰语</option>
+                  <option value="pl">🇵🇱 波兰语</option>
+                  <option value="uk">🇺🇦 乌克兰语</option>
+                  <option value="cs">🇨🇿 捷克语</option>
+                  <option value="ro">🇷🇴 罗马尼亚语</option>
+                  <option value="sv">🇸🇪 瑞典语</option>
+                  <option value="da">🇩🇰 丹麦语</option>
+                  <option value="no">🇳🇴 挪威语</option>
+                  <option value="fi">🇫🇮 芬兰语</option>
+                  <option value="el">🇬🇷 希腊语</option>
+                  <option value="hu">🇭🇺 匈牙利语</option>
+                  <option value="bg">🇧🇬 保加利亚语</option>
+                  <option value="sr">🇷🇸 塞尔维亚语</option>
+                  <option value="hr">🇭🇷 克罗地亚语</option>
+                  <option value="sk">🇸🇰 斯洛伐克语</option>
+                  <option value="sl">🇸🇮 斯洛文尼亚语</option>
+                  <option value="lt">🇱🇹 立陶宛语</option>
+                  <option value="lv">🇱🇻 拉脱维亚语</option>
+                  <option value="et">🇪🇪 爱沙尼亚语</option>
+                  <option value="sw">🇰🇪 斯瓦希里语</option>
+                  <option value="af">🇿🇦 南非荷兰语</option>
+                  <option value="am">🇪🇹 阿姆哈拉语</option>
                 </select>
                 <p class="setting-desc">消息翻译的目标语言</p>
               </div>
@@ -2989,19 +2835,54 @@
                 <label class="setting-title">输入框翻译目标语言</label>
                 <select id="inputBoxTargetLang" class="setting-select">
                   <option value="auto">🤖 自动检测（根据对方语言）</option>
-                  <option value="en">🇬🇧 English</option>
                   <option value="zh-CN">🇨🇳 中文简体</option>
                   <option value="zh-TW">🇹🇼 中文繁体</option>
-                  <option value="vi">🇻🇳 Tiếng Việt</option>
-                  <option value="ja">🇯🇵 日本語</option>
-                  <option value="ko">🇰🇷 한국어</option>
-                  <option value="es">🇪🇸 Español</option>
-                  <option value="fr">🇫🇷 Français</option>
-                  <option value="de">🇩🇪 Deutsch</option>
-                  <option value="ru">🇷🇺 Русский</option>
-                  <option value="ar">🇸🇦 العربية</option>
-                  <option value="pt">🇵🇹 Português</option>
-                  <option value="it">🇮🇹 Italiano</option>
+                  <option value="en">🇬🇧 英语</option>
+                  <option value="vi">🇻🇳 越南语</option>
+                  <option value="ja">🇯🇵 日语</option>
+                  <option value="ko">🇰🇷 韩语</option>
+                  <option value="th">🇹🇭 泰语</option>
+                  <option value="id">🇮🇩 印尼语</option>
+                  <option value="ms">🇲🇾 马来语</option>
+                  <option value="tl">🇵🇭 菲律宾语</option>
+                  <option value="my">🇲🇲 缅甸语</option>
+                  <option value="km">🇰🇭 高棉语</option>
+                  <option value="lo">🇱🇦 老挝语</option>
+                  <option value="es">🇪🇸 西班牙语</option>
+                  <option value="fr">🇫🇷 法语</option>
+                  <option value="de">🇩🇪 德语</option>
+                  <option value="it">🇮🇹 意大利语</option>
+                  <option value="pt">🇵🇹 葡萄牙语</option>
+                  <option value="ru">🇷🇺 俄语</option>
+                  <option value="ar">🇸🇦 阿拉伯语</option>
+                  <option value="hi">🇮🇳 印地语</option>
+                  <option value="bn">🇧🇩 孟加拉语</option>
+                  <option value="ur">🇵🇰 乌尔都语</option>
+                  <option value="tr">🇹🇷 土耳其语</option>
+                  <option value="fa">🇮🇷 波斯语</option>
+                  <option value="he">🇮🇱 希伯来语</option>
+                  <option value="nl">🇳🇱 荷兰语</option>
+                  <option value="pl">🇵🇱 波兰语</option>
+                  <option value="uk">🇺🇦 乌克兰语</option>
+                  <option value="cs">🇨🇿 捷克语</option>
+                  <option value="ro">🇷🇴 罗马尼亚语</option>
+                  <option value="sv">🇸🇪 瑞典语</option>
+                  <option value="da">🇩🇰 丹麦语</option>
+                  <option value="no">🇳🇴 挪威语</option>
+                  <option value="fi">🇫🇮 芬兰语</option>
+                  <option value="el">🇬🇷 希腊语</option>
+                  <option value="hu">🇭🇺 匈牙利语</option>
+                  <option value="bg">🇧🇬 保加利亚语</option>
+                  <option value="sr">🇷🇸 塞尔维亚语</option>
+                  <option value="hr">🇭🇷 克罗地亚语</option>
+                  <option value="sk">🇸🇰 斯洛伐克语</option>
+                  <option value="sl">🇸🇮 斯洛文尼亚语</option>
+                  <option value="lt">🇱🇹 立陶宛语</option>
+                  <option value="lv">🇱🇻 拉脱维亚语</option>
+                  <option value="et">🇪🇪 爱沙尼亚语</option>
+                  <option value="sw">🇰🇪 斯瓦希里语</option>
+                  <option value="af">🇿🇦 南非荷兰语</option>
+                  <option value="am">🇪🇹 阿姆哈拉语</option>
                 </select>
                 <p class="setting-desc">点击翻译按钮时将输入框内容翻译成的目标语言</p>
               </div>
@@ -3078,18 +2959,54 @@
                 <div class="setting-item">
                   <label class="setting-title">目标语言</label>
                   <select id="friendTargetLang" class="setting-select">
-                    <option value="zh-CN">中文简体</option>
-                    <option value="zh-TW">中文繁体</option>
-                    <option value="en">English</option>
-                    <option value="ja">日本語</option>
-                    <option value="ko">한국어</option>
-                    <option value="es">Español</option>
-                    <option value="fr">Français</option>
-                    <option value="de">Deutsch</option>
-                    <option value="ru">Русский</option>
-                    <option value="ar">العربية</option>
-                    <option value="pt">Português</option>
-                    <option value="it">Italiano</option>
+                    <option value="zh-CN">🇨🇳 中文简体</option>
+                    <option value="zh-TW">🇹🇼 中文繁体</option>
+                    <option value="en">🇬🇧 英语</option>
+                    <option value="vi">🇻🇳 越南语</option>
+                    <option value="ja">🇯🇵 日语</option>
+                    <option value="ko">🇰🇷 韩语</option>
+                    <option value="th">🇹🇭 泰语</option>
+                    <option value="id">🇮🇩 印尼语</option>
+                    <option value="ms">🇲🇾 马来语</option>
+                    <option value="tl">🇵🇭 菲律宾语</option>
+                    <option value="my">🇲🇲 缅甸语</option>
+                    <option value="km">🇰🇭 高棉语</option>
+                    <option value="lo">🇱🇦 老挝语</option>
+                    <option value="es">🇪🇸 西班牙语</option>
+                    <option value="fr">🇫🇷 法语</option>
+                    <option value="de">🇩🇪 德语</option>
+                    <option value="it">🇮🇹 意大利语</option>
+                    <option value="pt">🇵🇹 葡萄牙语</option>
+                    <option value="ru">🇷🇺 俄语</option>
+                    <option value="ar">🇸🇦 阿拉伯语</option>
+                    <option value="hi">🇮🇳 印地语</option>
+                    <option value="bn">🇧🇩 孟加拉语</option>
+                    <option value="ur">🇵🇰 乌尔都语</option>
+                    <option value="tr">🇹🇷 土耳其语</option>
+                    <option value="fa">🇮🇷 波斯语</option>
+                    <option value="he">🇮🇱 希伯来语</option>
+                    <option value="nl">🇳🇱 荷兰语</option>
+                    <option value="pl">🇵🇱 波兰语</option>
+                    <option value="uk">🇺🇦 乌克兰语</option>
+                    <option value="cs">🇨🇿 捷克语</option>
+                    <option value="ro">🇷🇴 罗马尼亚语</option>
+                    <option value="sv">🇸🇪 瑞典语</option>
+                    <option value="da">🇩🇰 丹麦语</option>
+                    <option value="no">🇳🇴 挪威语</option>
+                    <option value="fi">🇫🇮 芬兰语</option>
+                    <option value="el">🇬🇷 希腊语</option>
+                    <option value="hu">🇭🇺 匈牙利语</option>
+                    <option value="bg">🇧🇬 保加利亚语</option>
+                    <option value="sr">🇷🇸 塞尔维亚语</option>
+                    <option value="hr">🇭🇷 克罗地亚语</option>
+                    <option value="sk">🇸🇰 斯洛伐克语</option>
+                    <option value="sl">🇸🇮 斯洛文尼亚语</option>
+                    <option value="lt">🇱🇹 立陶宛语</option>
+                    <option value="lv">🇱🇻 拉脱维亚语</option>
+                    <option value="et">🇪🇪 爱沙尼亚语</option>
+                    <option value="sw">🇰🇪 斯瓦希里语</option>
+                    <option value="af">🇿🇦 南非荷兰语</option>
+                    <option value="am">🇪🇹 阿姆哈拉语</option>
                   </select>
                   <p class="setting-desc">该联系人消息的翻译目标语言</p>
                 </div>
