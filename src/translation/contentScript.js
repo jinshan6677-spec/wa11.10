@@ -268,9 +268,14 @@
 
         const messageText = textElement.textContent.trim();
         
-        // 检查是否是中文消息，如果是就跳过
-        if (this.isChinese(messageText)) {
-          console.log('[Translation] Message is already in Chinese, skipping');
+        // 聊天窗口翻译始终使用全局配置的目标语言（通常是中文）
+        // 不受好友独立配置影响
+        const targetLang = this.config.global.targetLang || 'zh-CN';
+        console.log('[Translation] Target language for incoming message:', targetLang);
+        
+        // 只有当目标语言是中文时，才跳过中文消息
+        if (targetLang.startsWith('zh') && this.isChinese(messageText)) {
+          console.log('[Translation] Message is already in Chinese and target is Chinese, skipping');
           return;
         }
         
@@ -289,19 +294,28 @@
      */
     getCurrentContactId() {
       try {
-        // 尝试从 URL 获取联系人 ID
+        // 方法1: 从 URL 获取联系人 ID
         const urlMatch = window.location.href.match(/\/chat\/([^/]+)/);
         if (urlMatch && urlMatch[1]) {
-          return urlMatch[1];
+          const contactId = decodeURIComponent(urlMatch[1]);
+          console.log('[Translation] Contact ID from URL:', contactId);
+          return contactId;
         }
         
-        // 备选：从聊天标题获取
-        const header = document.querySelector('[data-testid="conversation-info-header"]');
+        // 方法2: 从聊天标题获取
+        const header = document.querySelector('#main header [data-testid="conversation-info-header"]') ||
+                      document.querySelector('#main header span[dir="auto"]') ||
+                      document.querySelector('header[data-testid="chatlist-header"] + div span[dir="auto"]');
+        
         if (header) {
-          const title = header.textContent.trim();
-          return title; // 使用标题作为 ID
+          const contactName = header.textContent.trim();
+          if (contactName) {
+            console.log('[Translation] Contact ID from header:', contactName);
+            return contactName;
+          }
         }
         
+        console.warn('[Translation] Could not determine contact ID');
         return null;
       } catch (error) {
         console.error('[Translation] Error getting contact ID:', error);
@@ -313,25 +327,38 @@
      * 获取联系人的翻译配置（优先使用独立配置）
      */
     getContactConfig(contactId) {
+      console.log('[Translation] getContactConfig called with contactId:', contactId);
+      console.log('[Translation] friendIndependent enabled:', this.config.advanced.friendIndependent);
+      console.log('[Translation] friendConfigs:', this.config.friendConfigs);
+      
       // 如果没有启用好友独立配置，返回全局配置
       if (!this.config.advanced.friendIndependent) {
+        console.log('[Translation] Friend independent config is disabled, using global config');
         return this.config.global;
       }
       
       // 检查是否有该联系人的独立配置
       if (contactId && this.config.friendConfigs && this.config.friendConfigs[contactId]) {
         const friendConfig = this.config.friendConfigs[contactId];
+        console.log('[Translation] Found friend config for', contactId, ':', friendConfig);
+        
         if (friendConfig.enabled) {
-          console.log('[Translation] Using friend-specific config for:', contactId);
-          return {
+          const mergedConfig = {
             ...this.config.global,
             targetLang: friendConfig.targetLang || this.config.global.targetLang,
             blockChinese: friendConfig.blockChinese !== undefined ? friendConfig.blockChinese : this.config.advanced.blockChinese
           };
+          console.log('[Translation] ✓ Using friend-specific config:', mergedConfig);
+          return mergedConfig;
+        } else {
+          console.log('[Translation] Friend config exists but is disabled');
         }
+      } else {
+        console.log('[Translation] No friend config found for:', contactId);
       }
       
       // 返回全局配置
+      console.log('[Translation] Using global config');
       return this.config.global;
     },
 
@@ -345,17 +372,13 @@
           return;
         }
 
-        // 获取当前联系人 ID
-        const contactId = this.getCurrentContactId();
-        
-        // 获取该联系人的配置（可能是独立配置）
-        const contactConfig = this.getContactConfig(contactId);
-
+        // 聊天窗口翻译使用全局配置，不受好友独立配置影响
+        // 接收到的消息应该翻译成用户设置的目标语言（通常是中文）
         const response = await window.translationAPI.translate({
           text: text,
-          sourceLang: contactConfig.sourceLang || 'auto',
-          targetLang: contactConfig.targetLang,
-          engineName: contactConfig.engine || this.config.global.engine,
+          sourceLang: this.config.global.sourceLang || 'auto',
+          targetLang: this.config.global.targetLang || 'zh-CN',
+          engineName: this.config.global.engine,
           options: {}
         });
 
@@ -1195,8 +1218,17 @@
           button.disabled = true;
         }
 
+        // 获取当前联系人ID
+        const contactId = this.getCurrentContactId();
+        console.log('[Translation] Input box translation for contact:', contactId);
+        
+        // 获取该联系人的配置（可能是独立配置）
+        const contactConfig = this.getContactConfig(contactId);
+        console.log('[Translation] Using contact config:', contactConfig);
+        
         // 从配置中获取输入框翻译目标语言
-        let targetLang = this.config.inputBox.targetLang || 'auto';
+        // 优先使用好友独立配置的targetLang，否则使用inputBox配置
+        let targetLang = contactConfig.targetLang || this.config.inputBox.targetLang || 'auto';
         
         // 如果设置为自动检测，则检测对方使用的语言
         if (targetLang === 'auto') {
@@ -1209,7 +1241,7 @@
           targetLang = 'en';
         }
         
-        console.log('[Translation] Target language:', targetLang);
+        console.log('[Translation] Final target language:', targetLang);
         
         const response = await window.translationAPI.translate({
           text: text,
@@ -1515,8 +1547,17 @@
         // 500ms 后执行翻译
         debounceTimer = setTimeout(async () => {
           try {
+            // 获取当前联系人ID
+            const contactId = this.getCurrentContactId();
+            console.log('[Translation] Realtime translation for contact:', contactId);
+            
+            // 获取该联系人的配置（可能是独立配置）
+            const contactConfig = this.getContactConfig(contactId);
+            console.log('[Translation] Using contact config for realtime:', contactConfig);
+            
             // 从配置中获取输入框翻译目标语言
-            let targetLang = this.config.inputBox.targetLang || 'auto';
+            // 优先使用好友独立配置的targetLang，否则使用inputBox配置
+            let targetLang = contactConfig.targetLang || this.config.inputBox.targetLang || 'auto';
             
             // 如果设置为自动检测，则检测对方使用的语言
             if (targetLang === 'auto') {
@@ -1527,6 +1568,8 @@
             if (!targetLang || targetLang === 'auto') {
               targetLang = 'en';
             }
+            
+            console.log('[Translation] Realtime target language:', targetLang);
             
             const response = await window.translationAPI.translate({
               text: text,
