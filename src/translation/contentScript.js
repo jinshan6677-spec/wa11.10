@@ -44,6 +44,9 @@
         // 监听输入框
         this.observeInputBox();
 
+        // 设置中文拦截
+        this.setupChineseBlock();
+
         // 监听聊天窗口切换
         this.observeChatSwitch();
 
@@ -251,9 +254,13 @@
         }
 
         // 检查是否是群组消息
-        if (this.isGroupChat() && !this.config.global.groupTranslation) {
-          console.log('[Translation] Group translation disabled, skipping');
-          return;
+        const isGroup = this.isGroupChat();
+        if (isGroup) {
+          console.log('[Translation] This is a group chat, groupTranslation config:', this.config.global.groupTranslation);
+          if (!this.config.global.groupTranslation) {
+            console.log('[Translation] Group translation disabled, skipping');
+            return;
+          }
         }
 
         // 提取消息文本
@@ -929,7 +936,7 @@
     },
 
     /**
-     * 设置中文拦截
+     * 设置中文拦截 - 多层防御方案
      */
     setupChineseBlock() {
       // 移除旧的监听器
@@ -939,76 +946,171 @@
       if (this.chineseBlockClickHandler) {
         document.removeEventListener('click', this.chineseBlockClickHandler, true);
       }
+      if (this.chineseBlockMouseDownHandler) {
+        document.removeEventListener('mousedown', this.chineseBlockMouseDownHandler, true);
+      }
+      if (this.chineseBlockInputMonitor) {
+        clearInterval(this.chineseBlockInputMonitor);
+      }
       
       // 检查是否需要启用拦截
-      if (!this.shouldBlockChinese()) {
+      const shouldBlock = this.shouldBlockChinese();
+      console.log('[Translation] setupChineseBlock called, shouldBlock=', shouldBlock);
+      console.log('[Translation] Config:', {
+        blockChinese: this.config.advanced.blockChinese,
+        friendIndependent: this.config.advanced.friendIndependent
+      });
+      
+      if (!shouldBlock) {
         console.log('[Translation] Chinese blocking disabled');
         return;
       }
       
-      console.log('[Translation] Setting up Chinese blocking');
+      console.log('[Translation] Setting up Chinese blocking with multi-layer defense');
       
-      // 创建键盘监听器（拦截 Enter 键发送）
-      this.chineseBlockHandler = (e) => {
-        // 检测 Enter 键（发送消息）
-        if (e.key === 'Enter' && !e.shiftKey) {
-          const inputBox = document.querySelector('footer [contenteditable="true"]') ||
-                          document.querySelector('[data-testid="conversation-compose-box-input"]');
-          
-          if (!inputBox) return;
-          
-          const text = inputBox.textContent || inputBox.innerText || '';
-          
-          if (this.containsChinese(text)) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            
-            // 显示提示
-            this.showChineseBlockAlert();
-            
-            console.log('[Translation] Blocked Chinese message send via Enter');
-            return false;
+      // 获取输入框的辅助函数
+      const getInputBox = () => {
+        return document.querySelector('footer [contenteditable="true"]') ||
+               document.querySelector('[data-testid="conversation-compose-box-input"]') ||
+               document.querySelector('#main footer div[contenteditable="true"]');
+      };
+      
+      // 获取输入框文本的辅助函数
+      const getInputText = (inputBox) => {
+        if (!inputBox) return '';
+        
+        // 尝试多种方式获取文本
+        if (inputBox.hasAttribute('data-lexical-editor')) {
+          const textNodes = inputBox.querySelectorAll('p, span[data-text="true"]');
+          if (textNodes.length > 0) {
+            return Array.from(textNodes).map(node => node.textContent).join('\n');
           }
+        }
+        
+        return inputBox.textContent || inputBox.innerText || '';
+      };
+      
+      // 检查并拦截的核心函数
+      const checkAndBlock = (e, source) => {
+        const inputBox = getInputBox();
+        if (!inputBox) {
+          console.log(`[Translation] ${source}: No input box found`);
+          return false;
+        }
+        
+        const text = getInputText(inputBox);
+        console.log(`[Translation] ${source}: Checking text:`, text);
+        
+        if (this.containsChinese(text)) {
+          console.log(`[Translation] ${source}: Chinese detected! Blocking...`);
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          
+          // 显示提示
+          this.showChineseBlockAlert();
+          
+          console.log(`[Translation] Blocked Chinese message send via ${source}`);
+          return true;
+        }
+        
+        console.log(`[Translation] ${source}: No Chinese detected, allowing`);
+        return false;
+      };
+      
+      // 第1层：拦截 keydown 事件（Enter 键）
+      this.chineseBlockHandler = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          checkAndBlock(e, 'Enter key');
         }
       };
       
-      // 创建点击监听器（拦截发送按钮点击）
-      this.chineseBlockClickHandler = (e) => {
-        // 检查是否点击了发送按钮
+      // 第2层：拦截 keypress 事件（备用）
+      this.chineseBlockKeypressHandler = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          checkAndBlock(e, 'Enter keypress');
+        }
+      };
+      
+      // 第3层：拦截 mousedown 事件（比 click 更早）
+      this.chineseBlockMouseDownHandler = (e) => {
         const target = e.target;
         const sendButton = target.closest('[data-testid="send"]') || 
                           target.closest('button[aria-label*="发送"]') ||
                           target.closest('button[aria-label*="Send"]') ||
-                          target.closest('span[data-icon="send"]');
+                          target.closest('span[data-icon="send"]')?.parentElement;
         
         if (sendButton) {
-          const inputBox = document.querySelector('footer [contenteditable="true"]') ||
-                          document.querySelector('[data-testid="conversation-compose-box-input"]');
-          
-          if (!inputBox) return;
-          
-          const text = inputBox.textContent || inputBox.innerText || '';
-          
-          if (this.containsChinese(text)) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            
-            // 显示提示
-            this.showChineseBlockAlert();
-            
-            console.log('[Translation] Blocked Chinese message send via button');
-            return false;
-          }
+          checkAndBlock(e, 'mousedown on send button');
         }
       };
       
-      // 添加监听器（使用 capture 阶段，优先级最高）
+      // 第4层：拦截 click 事件（双重保险）
+      this.chineseBlockClickHandler = (e) => {
+        const target = e.target;
+        const sendButton = target.closest('[data-testid="send"]') || 
+                          target.closest('button[aria-label*="发送"]') ||
+                          target.closest('button[aria-label*="Send"]') ||
+                          target.closest('span[data-icon="send"]')?.parentElement;
+        
+        if (sendButton) {
+          checkAndBlock(e, 'click on send button');
+        }
+      };
+      
+      // 第5层：持续监控输入框，如果检测到中文则禁用发送按钮
+      let lastLogTime = 0;
+      this.chineseBlockInputMonitor = setInterval(() => {
+        if (!this.shouldBlockChinese()) return;
+        
+        const inputBox = getInputBox();
+        if (!inputBox) return;
+        
+        const text = getInputText(inputBox);
+        const hasChinese = this.containsChinese(text);
+        
+        // 每秒最多打印一次日志，避免刷屏
+        const now = Date.now();
+        if (text && now - lastLogTime > 1000) {
+          console.log('[Translation] Monitor: text=', text, 'hasChinese=', hasChinese);
+          lastLogTime = now;
+        }
+        
+        // 查找发送按钮
+        const sendButton = document.querySelector('[data-testid="send"]') ||
+                          document.querySelector('button[aria-label*="发送"]') ||
+                          document.querySelector('button[aria-label*="Send"]') ||
+                          document.querySelector('span[data-icon="send"]')?.parentElement;
+        
+        if (sendButton) {
+          if (hasChinese) {
+            // 禁用发送按钮
+            sendButton.style.pointerEvents = 'none';
+            sendButton.style.opacity = '0.5';
+            sendButton.setAttribute('data-chinese-blocked', 'true');
+            
+            if (now - lastLogTime > 1000) {
+              console.log('[Translation] Monitor: Send button DISABLED');
+            }
+          } else {
+            // 恢复发送按钮
+            if (sendButton.getAttribute('data-chinese-blocked') === 'true') {
+              sendButton.style.pointerEvents = '';
+              sendButton.style.opacity = '';
+              sendButton.removeAttribute('data-chinese-blocked');
+              console.log('[Translation] Monitor: Send button ENABLED');
+            }
+          }
+        }
+      }, 100); // 每100ms检查一次
+      
+      // 添加所有监听器（使用 capture 阶段，优先级最高）
       document.addEventListener('keydown', this.chineseBlockHandler, true);
+      document.addEventListener('keypress', this.chineseBlockKeypressHandler, true);
+      document.addEventListener('mousedown', this.chineseBlockMouseDownHandler, true);
       document.addEventListener('click', this.chineseBlockClickHandler, true);
       
-      console.log('[Translation] Chinese blocking enabled');
+      console.log('[Translation] Chinese blocking enabled with 5-layer defense');
     },
 
     /**
@@ -1222,13 +1324,28 @@
         const contactId = this.getCurrentContactId();
         console.log('[Translation] Input box translation for contact:', contactId);
         
-        // 获取该联系人的配置（可能是独立配置）
-        const contactConfig = this.getContactConfig(contactId);
-        console.log('[Translation] Using contact config:', contactConfig);
+        // 获取目标语言
+        // 优先级：语言选择器 > 联系人独立配置 > 输入框配置
+        const langSelector = document.getElementById('wa-lang-selector');
+        let targetLang = langSelector ? langSelector.value : null;
         
-        // 从配置中获取输入框翻译目标语言
-        // 优先使用好友独立配置的targetLang，否则使用inputBox配置
-        let targetLang = contactConfig.targetLang || this.config.inputBox.targetLang || 'auto';
+        // 如果语言选择器没有选择或选择了auto
+        if (!targetLang || targetLang === 'auto') {
+          // 如果启用了好友独立配置，且该联系人有独立配置
+          if (this.config.advanced.friendIndependent && 
+              contactId && 
+              this.config.friendConfigs && 
+              this.config.friendConfigs[contactId] &&
+              this.config.friendConfigs[contactId].enabled) {
+            // 使用联系人的独立配置
+            targetLang = this.config.friendConfigs[contactId].targetLang || this.config.inputBox.targetLang || 'auto';
+            console.log('[Translation] Using friend-specific targetLang:', targetLang);
+          } else {
+            // 使用输入框配置（不是全局配置！）
+            targetLang = this.config.inputBox.targetLang || 'auto';
+            console.log('[Translation] Using inputBox targetLang:', targetLang);
+          }
+        }
         
         // 如果设置为自动检测，则检测对方使用的语言
         if (targetLang === 'auto') {
@@ -1555,13 +1672,33 @@
             const contactConfig = this.getContactConfig(contactId);
             console.log('[Translation] Using contact config for realtime:', contactConfig);
             
-            // 从配置中获取输入框翻译目标语言
-            // 优先使用好友独立配置的targetLang，否则使用inputBox配置
-            let targetLang = contactConfig.targetLang || this.config.inputBox.targetLang || 'auto';
+            // 获取目标语言
+            // 优先级：语言选择器 > 联系人独立配置 > 输入框配置
+            const langSelector = document.getElementById('wa-lang-selector');
+            let targetLang = langSelector ? langSelector.value : null;
+            
+            // 如果语言选择器没有选择或选择了auto
+            if (!targetLang || targetLang === 'auto') {
+              // 如果启用了好友独立配置，且该联系人有独立配置
+              if (this.config.advanced.friendIndependent && 
+                  contactId && 
+                  this.config.friendConfigs && 
+                  this.config.friendConfigs[contactId] &&
+                  this.config.friendConfigs[contactId].enabled) {
+                // 使用联系人的独立配置
+                targetLang = this.config.friendConfigs[contactId].targetLang || this.config.inputBox.targetLang || 'auto';
+                console.log('[Translation] Using friend-specific targetLang:', targetLang);
+              } else {
+                // 使用输入框配置（不是全局配置！）
+                targetLang = this.config.inputBox.targetLang || 'auto';
+                console.log('[Translation] Using inputBox targetLang:', targetLang);
+              }
+            }
             
             // 如果设置为自动检测，则检测对方使用的语言
             if (targetLang === 'auto') {
               targetLang = await this.detectChatLanguage();
+              console.log('[Translation] Auto-detected target language:', targetLang);
             }
             
             // 如果还是检测不到，默认翻译成英文
@@ -1675,134 +1812,7 @@
       }
     },
 
-    /**
-     * 设置中文拦截
-     */
-    setupChineseBlock(inputBox) {
-      // 移除旧的监听器
-      if (this.chineseBlockHandler) {
-        document.removeEventListener('keydown', this.chineseBlockHandler, true);
-      }
-      if (this.chineseBlockClickHandler) {
-        document.removeEventListener('click', this.chineseBlockClickHandler, true);
-      }
-      
-      let isAutoTranslating = false;
-      
-      // 保存原始文本并在发送后翻译
-      let pendingTranslation = null;
-      
-      const scheduleTranslation = (text) => {
-        if (!this.containsChinese(text)) {
-          return;
-        }
-        
-        console.log('[Translation] Scheduling auto-translation for:', text);
-        pendingTranslation = text;
-        
-        // 等待消息发送完成后翻译并发送
-        setTimeout(async () => {
-          if (!pendingTranslation) return;
-          
-          const textToTranslate = pendingTranslation;
-          pendingTranslation = null;
-          
-          try {
-            // 获取目标语言
-            const langSelector = document.getElementById('wa-lang-selector');
-            let targetLang = langSelector ? langSelector.value : null;
-            
-            if (!targetLang || targetLang === 'auto') {
-              targetLang = await this.detectChatLanguage();
-            }
-            
-            console.log('[Translation] Translating:', textToTranslate, 'to', targetLang);
-            
-            // 翻译
-            const response = await window.translationAPI.translate({
-              text: textToTranslate,
-              sourceLang: 'auto',
-              targetLang: targetLang,
-              engineName: this.config.global.engine,
-              options: {
-                style: this.config.inputBox.style
-              }
-            });
-            
-            if (response.success) {
-              const translatedText = response.data.translatedText;
-              console.log('[Translation] Translation successful:', translatedText);
-              
-              // 在输入框中输入翻译结果
-              inputBox.focus();
-              
-              // 清空输入框
-              inputBox.innerHTML = '';
-              inputBox.textContent = '';
-              
-              // 插入翻译文本
-              document.execCommand('insertText', false, `[翻译] ${translatedText}`);
-              
-              // 等待一下
-              await new Promise(resolve => setTimeout(resolve, 200));
-              
-              // 自动发送
-              const enterEvent = new KeyboardEvent('keydown', {
-                key: 'Enter',
-                code: 'Enter',
-                keyCode: 13,
-                which: 13,
-                bubbles: true,
-                cancelable: true
-              });
-              inputBox.dispatchEvent(enterEvent);
-              
-              console.log('[Translation] Translated message sent');
-            }
-          } catch (error) {
-            console.error('[Translation] Auto-translation error:', error);
-          }
-        }, 500); // 等待500ms让原始消息先发送
-      };
-      
-      // 创建键盘监听器
-      this.chineseBlockHandler = (e) => {
-        // 检测 Enter 键（发送消息）
-        if (e.key === 'Enter' && !e.shiftKey) {
-          const text = inputBox.textContent || inputBox.innerText || '';
-          
-          if (this.containsChinese(text)) {
-            // 不阻止发送，但安排翻译
-            scheduleTranslation(text);
-          }
-        }
-      };
-      
-      // 创建点击监听器（拦截发送按钮点击）
-      this.chineseBlockClickHandler = (e) => {
-        // 检查是否点击了发送按钮
-        const target = e.target;
-        const sendButton = target.closest('[data-testid="send"]') || 
-                          target.closest('button[aria-label*="发送"]') ||
-                          target.closest('button[aria-label*="Send"]') ||
-                          target.closest('span[data-icon="send"]');
-        
-        if (sendButton) {
-          const text = inputBox.textContent || inputBox.innerText || '';
-          
-          if (this.containsChinese(text)) {
-            // 不阻止发送，但安排翻译
-            scheduleTranslation(text);
-          }
-        }
-      };
-      
-      // 添加监听器（使用 capture 阶段，优先级最高）
-      document.addEventListener('keydown', this.chineseBlockHandler, true);
-      document.addEventListener('click', this.chineseBlockClickHandler, true);
-      
-      console.log('[Translation] Auto-translate on send enabled - will send translation after Chinese message');
-    },
+
 
     /**
      * 检测是否包含中文
@@ -1994,6 +2004,7 @@
           setTimeout(() => {
             this.translateExistingMessages();
             this.observeInputBox(); // 重新设置输入框
+            this.setupChineseBlock(); // 重新设置中文拦截
             this.showFriendConfigIndicator(); // 显示独立配置标识
           }, 500);
         }
@@ -2019,6 +2030,7 @@
             setTimeout(() => {
               this.translateExistingMessages();
               this.observeInputBox(); // 重新设置输入框和翻译按钮
+              this.setupChineseBlock(); // 重新设置中文拦截
               this.showFriendConfigIndicator(); // 显示独立配置标识
             }, 300);
           }
@@ -3362,6 +3374,9 @@
             
             // 重新初始化输入框功能
             window.WhatsAppTranslation.observeInputBox();
+            
+            // 重新设置中文拦截（配置可能已更改）
+            window.WhatsAppTranslation.setupChineseBlock();
           }
           
           // 显示成功消息
