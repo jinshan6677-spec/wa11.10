@@ -16,6 +16,13 @@
     initialized: false,
     accountId: 'default',
     isTranslating: false, // 防止重复翻译
+    
+    // 优化：添加初始化标志，防止重复初始化
+    _chineseBlockInitialized: false,
+    _realtimeInitialized: false,
+    _buttonMonitorInitialized: false,
+    _lastContactId: null,
+    _lastLogTime: {}, // 日志节流记录
 
     /**
      * 初始化翻译系统
@@ -298,6 +305,7 @@
 
     /**
      * 获取当前聊天的联系人 ID
+     * 优化：添加日志节流，只在联系人变化时输出日志
      */
     getCurrentContactId() {
       try {
@@ -305,7 +313,11 @@
         const urlMatch = window.location.href.match(/\/chat\/([^/]+)/);
         if (urlMatch && urlMatch[1]) {
           const contactId = decodeURIComponent(urlMatch[1]);
-          console.log('[Translation] Contact ID from URL:', contactId);
+          // 只在联系人变化时输出日志
+          if (this._lastContactId !== contactId) {
+            console.log('[Translation] Contact ID changed to:', contactId);
+            this._lastContactId = contactId;
+          }
           return contactId;
         }
         
@@ -317,12 +329,20 @@
         if (header) {
           const contactName = header.textContent.trim();
           if (contactName) {
-            console.log('[Translation] Contact ID from header:', contactName);
+            // 只在联系人变化时输出日志
+            if (this._lastContactId !== contactName) {
+              console.log('[Translation] Contact ID changed to:', contactName);
+              this._lastContactId = contactName;
+            }
             return contactName;
           }
         }
         
-        console.warn('[Translation] Could not determine contact ID');
+        // 只在第一次失败时输出警告
+        if (this._lastContactId !== null) {
+          console.warn('[Translation] Could not determine contact ID');
+          this._lastContactId = null;
+        }
         return null;
       } catch (error) {
         console.error('[Translation] Error getting contact ID:', error);
@@ -505,16 +525,26 @@
 
     /**
      * 持续监控翻译按钮，确保它始终存在
+     * 优化：添加防抖和初始化标志，避免重复初始化
      */
     startButtonMonitoring() {
+      // 如果已经初始化过，直接返回
+      if (this._buttonMonitorInitialized) {
+        return;
+      }
+      
       // 如果已经有监控器在运行，先停止
       if (this.buttonMonitor) {
         this.buttonMonitor.disconnect();
       }
       
+      if (this.buttonCheckInterval) {
+        clearInterval(this.buttonCheckInterval);
+      }
+      
       console.log('[Translation] Starting button monitoring');
       
-      // 每秒检查一次按钮是否存在
+      // 优化：增加检查间隔到 3 秒，减少频繁检查
       this.buttonCheckInterval = setInterval(() => {
         if (!this.config || !this.config.inputBox || !this.config.inputBox.enabled) {
           return;
@@ -525,7 +555,12 @@
         
         // 如果按钮不存在，或者不在正确的 footer 中
         if (!button || (footer && !footer.contains(button))) {
-          console.log('[Translation] Button missing or in wrong location, re-adding...');
+          // 节流日志：每 5 秒最多输出一次
+          const now = Date.now();
+          if (!this._lastLogTime.buttonCheck || now - this._lastLogTime.buttonCheck > 5000) {
+            console.log('[Translation] Button missing or in wrong location, re-adding...');
+            this._lastLogTime.buttonCheck = now;
+          }
           
           // 移除旧按钮（如果存在但位置不对）
           if (button) {
@@ -535,29 +570,46 @@
           // 重新初始化
           this.initInputBoxTranslation();
         }
-      }, 1000);
+      }, 3000); // 从 1000ms 改为 3000ms
       
       // 也使用 MutationObserver 监控 #main 的变化
       const mainContainer = document.querySelector('#main');
       if (mainContainer) {
+        // 优化：添加防抖，避免频繁触发
+        let debounceTimer = null;
+        
         this.buttonMonitor = new MutationObserver((mutations) => {
-          // 检查是否有 footer 相关的变化
-          const hasFooterChange = mutations.some(m => {
-            return Array.from(m.addedNodes).some(node => 
-              node.nodeName === 'FOOTER' || 
-              (node.querySelector && node.querySelector('footer'))
-            ) || Array.from(m.removedNodes).some(node =>
-              node.nodeName === 'FOOTER' ||
-              (node.querySelector && node.querySelector('footer'))
-            );
-          });
-          
-          if (hasFooterChange) {
-            console.log('[Translation] Footer changed, re-adding button...');
-            setTimeout(() => {
-              this.initInputBoxTranslation();
-            }, 200);
+          // 清除之前的定时器
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
           }
+          
+          // 500ms 防抖
+          debounceTimer = setTimeout(() => {
+            // 检查是否有 footer 相关的变化
+            const hasFooterChange = mutations.some(m => {
+              return Array.from(m.addedNodes).some(node => 
+                node.nodeName === 'FOOTER' || 
+                (node.querySelector && node.querySelector('footer'))
+              ) || Array.from(m.removedNodes).some(node =>
+                node.nodeName === 'FOOTER' ||
+                (node.querySelector && node.querySelector('footer'))
+              );
+            });
+            
+            if (hasFooterChange) {
+              // 节流日志
+              const now = Date.now();
+              if (!this._lastLogTime.footerChange || now - this._lastLogTime.footerChange > 5000) {
+                console.log('[Translation] Footer changed, re-adding button...');
+                this._lastLogTime.footerChange = now;
+              }
+              
+              setTimeout(() => {
+                this.initInputBoxTranslation();
+              }, 200);
+            }
+          }, 500);
         });
         
         this.buttonMonitor.observe(mainContainer, {
@@ -565,10 +617,14 @@
           subtree: true
         });
       }
+      
+      // 标记为已初始化
+      this._buttonMonitorInitialized = true;
     },
 
     /**
      * 初始化输入框翻译
+     * 优化：清理旧的监听器，避免重复初始化
      */
     initInputBoxTranslation() {
       // 先移除旧的翻译按钮（如果存在）
@@ -600,25 +656,30 @@
         console.log('[Translation] Input box translation disabled in config');
       }
 
-      // 设置实时翻译
+      // 设置实时翻译（会自动清理旧的监听器）
       if (this.config && this.config.advanced && this.config.advanced.realtime) {
         this.setupRealtimeTranslation(inputBox);
+      } else {
+        // 如果禁用了实时翻译，清理相关资源
+        this.cleanupRealtimeTranslation();
       }
 
-      // 设置中文拦截
+      // 设置中文拦截（会自动清理旧的监听器）
       this.setupChineseBlock();
       
-      // 监听消息发送，自动关闭反向翻译窗口
+      // 监听消息发送，自动关闭反向翻译窗口（会自动清理旧的监听器）
       this.setupSendMonitoring(inputBox);
     },
 
     /**
      * 监听消息发送，自动关闭反向翻译窗口
+     * 优化：清理旧的监听器
      */
     setupSendMonitoring(inputBox) {
       // 停止旧的监听器
       if (this.messageSentObserver) {
         this.messageSentObserver.disconnect();
+        this.messageSentObserver = null;
       }
       
       // 查找消息容器
@@ -937,34 +998,30 @@
 
     /**
      * 设置中文拦截 - 多层防御方案
+     * 优化：添加初始化标志，避免重复设置
      */
     setupChineseBlock() {
-      // 移除旧的监听器
-      if (this.chineseBlockHandler) {
-        document.removeEventListener('keydown', this.chineseBlockHandler, true);
-      }
-      if (this.chineseBlockClickHandler) {
-        document.removeEventListener('click', this.chineseBlockClickHandler, true);
-      }
-      if (this.chineseBlockMouseDownHandler) {
-        document.removeEventListener('mousedown', this.chineseBlockMouseDownHandler, true);
-      }
-      if (this.chineseBlockInputMonitor) {
-        clearInterval(this.chineseBlockInputMonitor);
-      }
-      
       // 检查是否需要启用拦截
       const shouldBlock = this.shouldBlockChinese();
-      console.log('[Translation] setupChineseBlock called, shouldBlock=', shouldBlock);
-      console.log('[Translation] Config:', {
-        blockChinese: this.config.advanced.blockChinese,
-        friendIndependent: this.config.advanced.friendIndependent
-      });
       
+      // 如果不需要拦截，清理资源并返回
       if (!shouldBlock) {
-        console.log('[Translation] Chinese blocking disabled');
+        this.cleanupChineseBlock();
+        // 只在状态变化时输出日志
+        if (this._chineseBlockInitialized) {
+          console.log('[Translation] Chinese blocking disabled');
+          this._chineseBlockInitialized = false;
+        }
         return;
       }
+      
+      // 如果已经初始化过且配置没变，直接返回
+      if (this._chineseBlockInitialized) {
+        return;
+      }
+      
+      // 清理旧的监听器
+      this.cleanupChineseBlock();
       
       console.log('[Translation] Setting up Chinese blocking with multi-layer defense');
       
@@ -1110,7 +1167,37 @@
       document.addEventListener('mousedown', this.chineseBlockMouseDownHandler, true);
       document.addEventListener('click', this.chineseBlockClickHandler, true);
       
+      // 标记为已初始化
+      this._chineseBlockInitialized = true;
+      
       console.log('[Translation] Chinese blocking enabled with 5-layer defense');
+    },
+    
+    /**
+     * 清理中文拦截相关资源
+     * 优化：统一的清理方法
+     */
+    cleanupChineseBlock() {
+      if (this.chineseBlockHandler) {
+        document.removeEventListener('keydown', this.chineseBlockHandler, true);
+        this.chineseBlockHandler = null;
+      }
+      if (this.chineseBlockKeypressHandler) {
+        document.removeEventListener('keypress', this.chineseBlockKeypressHandler, true);
+        this.chineseBlockKeypressHandler = null;
+      }
+      if (this.chineseBlockClickHandler) {
+        document.removeEventListener('click', this.chineseBlockClickHandler, true);
+        this.chineseBlockClickHandler = null;
+      }
+      if (this.chineseBlockMouseDownHandler) {
+        document.removeEventListener('mousedown', this.chineseBlockMouseDownHandler, true);
+        this.chineseBlockMouseDownHandler = null;
+      }
+      if (this.chineseBlockInputMonitor) {
+        clearInterval(this.chineseBlockInputMonitor);
+        this.chineseBlockInputMonitor = null;
+      }
     },
 
     /**
@@ -1596,23 +1683,20 @@
 
     /**
      * 设置实时翻译
+     * 优化：添加初始化标志，避免重复设置
      */
     setupRealtimeTranslation(inputBox) {
-      // 移除旧的监听器
-      if (this.realtimeInputHandler) {
-        inputBox.removeEventListener('input', this.realtimeInputHandler);
-      }
+      console.log('[Translation] setupRealtimeTranslation called, realtime enabled:', this.config.advanced.realtime);
       
       // 检查是否启用实时翻译
       if (!this.config.advanced.realtime) {
+        this.cleanupRealtimeTranslation();
         console.log('[Translation] Realtime translation disabled');
-        // 移除预览元素
-        const preview = document.querySelector('.wa-realtime-preview');
-        if (preview) {
-          preview.remove();
-        }
         return;
       }
+      
+      // 清理旧的监听器（每次都清理，因为 inputBox 可能是新的元素）
+      this.cleanupRealtimeTranslation();
       
       console.log('[Translation] Setting up realtime translation');
       
@@ -1733,7 +1817,38 @@
       // 添加监听器
       inputBox.addEventListener('input', this.realtimeInputHandler);
       
-      console.log('[Translation] Realtime translation enabled');
+      // 标记为已初始化
+      this._realtimeInitialized = true;
+      
+      console.log('[Translation] Realtime translation enabled, handler attached to inputBox');
+    },
+    
+    /**
+     * 清理实时翻译相关资源
+     * 优化：统一的清理方法
+     */
+    cleanupRealtimeTranslation() {
+      // 移除旧的监听器
+      if (this.realtimeInputHandler) {
+        const inputBox = document.querySelector('#main footer [contenteditable="true"]') ||
+                        document.querySelector('footer [contenteditable="true"]');
+        if (inputBox) {
+          inputBox.removeEventListener('input', this.realtimeInputHandler);
+        }
+        this.realtimeInputHandler = null;
+      }
+      
+      // 只在禁用实时翻译时才移除预览元素
+      // 如果只是重新初始化，保留预览元素
+      if (!this.config || !this.config.advanced || !this.config.advanced.realtime) {
+        const preview = document.querySelector('.wa-realtime-preview');
+        if (preview) {
+          preview.remove();
+        }
+      }
+      
+      // 重置初始化标志
+      this._realtimeInitialized = false;
     },
 
     /**
@@ -1988,21 +2103,34 @@
 
     /**
      * 监听聊天窗口切换
+     * 优化：添加防抖，避免频繁触发
      */
     observeChatSwitch() {
       console.log('[Translation] Setting up chat switch observer');
       
       // 监听 URL 变化（WhatsApp Web 使用 hash 路由）
       let lastUrl = location.href;
+      let urlChangeTimer = null;
+      
       const urlObserver = new MutationObserver(() => {
         const currentUrl = location.href;
         if (currentUrl !== lastUrl) {
           lastUrl = currentUrl;
           console.log('[Translation] Chat switched, re-translating messages');
           
+          // 清除之前的定时器
+          if (urlChangeTimer) {
+            clearTimeout(urlChangeTimer);
+          }
+          
           // 延迟一下，等待新聊天加载
-          setTimeout(() => {
+          urlChangeTimer = setTimeout(() => {
             this.translateExistingMessages();
+            
+            // 重置初始化标志，允许重新初始化
+            this._chineseBlockInitialized = false;
+            this._realtimeInitialized = false;
+            
             this.observeInputBox(); // 重新设置输入框
             this.setupChineseBlock(); // 重新设置中文拦截
             this.showFriendConfigIndicator(); // 显示独立配置标识
@@ -2019,21 +2147,36 @@
       // 也监听 #main 容器的变化
       const mainContainer = document.querySelector('#main');
       if (mainContainer) {
+        let chatChangeTimer = null;
+        
         const chatObserver = new MutationObserver((mutations) => {
-          // 检查是否有大的 DOM 变化（可能是切换聊天）
-          const hasSignificantChange = mutations.some(m => 
-            m.addedNodes.length > 5 || m.removedNodes.length > 5
-          );
-          
-          if (hasSignificantChange) {
-            console.log('[Translation] Significant DOM change detected');
-            setTimeout(() => {
-              this.translateExistingMessages();
-              this.observeInputBox(); // 重新设置输入框和翻译按钮
-              this.setupChineseBlock(); // 重新设置中文拦截
-              this.showFriendConfigIndicator(); // 显示独立配置标识
-            }, 300);
+          // 清除之前的定时器
+          if (chatChangeTimer) {
+            clearTimeout(chatChangeTimer);
           }
+          
+          // 500ms 防抖
+          chatChangeTimer = setTimeout(() => {
+            // 检查是否有大的 DOM 变化（可能是切换聊天）
+            const hasSignificantChange = mutations.some(m => 
+              m.addedNodes.length > 5 || m.removedNodes.length > 5
+            );
+            
+            if (hasSignificantChange) {
+              console.log('[Translation] Significant DOM change detected');
+              setTimeout(() => {
+                this.translateExistingMessages();
+                
+                // 重置初始化标志，允许重新初始化
+                this._chineseBlockInitialized = false;
+                this._realtimeInitialized = false;
+                
+                this.observeInputBox(); // 重新设置输入框和翻译按钮
+                this.setupChineseBlock(); // 重新设置中文拦截
+                this.showFriendConfigIndicator(); // 显示独立配置标识
+              }, 300);
+            }
+          }, 500);
         });
 
         chatObserver.observe(mainContainer, {
@@ -2685,18 +2828,22 @@
 
     /**
      * 清理资源
+     * 优化：完善清理机制，清理所有监听器和定时器
      */
     cleanup() {
+      // 清理消息观察器
       if (this.messageObserver) {
         this.messageObserver.disconnect();
         this.messageObserver = null;
       }
 
+      // 清理输入框观察器
       if (this.inputObserver) {
         this.inputObserver.disconnect();
         this.inputObserver = null;
       }
 
+      // 清理按钮监控
       if (this.buttonMonitor) {
         this.buttonMonitor.disconnect();
         this.buttonMonitor = null;
@@ -2707,17 +2854,38 @@
         this.buttonCheckInterval = null;
       }
 
+      // 清理消息发送监控
       if (this.messageSentObserver) {
         this.messageSentObserver.disconnect();
         this.messageSentObserver = null;
       }
 
+      // 清理中文拦截
+      this.cleanupChineseBlock();
+      
+      // 清理实时翻译
+      this.cleanupRealtimeTranslation();
+
+      // 清理样式
       const styles = document.getElementById('wa-translation-styles');
       if (styles) {
         styles.remove();
       }
+      
+      // 清理翻译按钮
+      const button = document.getElementById('wa-translate-btn');
+      if (button) {
+        button.remove();
+      }
 
+      // 重置初始化标志
       this.initialized = false;
+      this._chineseBlockInitialized = false;
+      this._realtimeInitialized = false;
+      this._buttonMonitorInitialized = false;
+      this._lastContactId = null;
+      this._lastLogTime = {};
+      
       console.log('[Translation] Cleaned up');
     }
   };
