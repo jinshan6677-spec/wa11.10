@@ -43,6 +43,12 @@
         // 监听输入框
         this.observeInputBox();
 
+        // 监听聊天窗口切换
+        this.observeChatSwitch();
+
+        // 启动定期检查新消息
+        this.startPeriodicCheck();
+
         this.initialized = true;
         console.log('[Translation] Initialized successfully');
 
@@ -132,44 +138,72 @@
      * 监听消息
      */
     observeMessages() {
-      // 查找消息容器
-      const chatContainer = document.querySelector('[data-testid="conversation-panel-messages"]') ||
-                           document.querySelector('#main .copyable-area') ||
-                           document.querySelector('[role="application"]');
+      // 查找主容器（#main 会在切换聊天时保持不变）
+      const mainContainer = document.querySelector('#main');
 
-      if (!chatContainer) {
-        console.warn('[Translation] Chat container not found, retrying...');
+      if (!mainContainer) {
+        console.warn('[Translation] Main container not found, retrying...');
         setTimeout(() => this.observeMessages(), 2000);
         return;
       }
 
       console.log('[Translation] Starting message observation');
 
-      // 创建 MutationObserver
+      // 断开旧的观察器
+      if (this.messageObserver) {
+        this.messageObserver.disconnect();
+      }
+
+      // 创建 MutationObserver - 观察整个 #main 容器
       this.messageObserver = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
           mutation.addedNodes.forEach((node) => {
             if (node.nodeType === 1) {
-              // 检查是否是消息节点
+              // 检查节点本身是否是消息
+              if (node.classList && (node.classList.contains('message-in') || node.classList.contains('message-out'))) {
+                console.log('[Translation] New message detected:', node);
+                if (!node.querySelector('.wa-translation-result')) {
+                  this.handleNewMessage(node);
+                }
+              }
+              
+              // 检查是否包含消息节点
               if (this.isMessageNode(node)) {
                 this.handleNewMessage(node);
               }
-              // 也检查子节点
-              const messages = node.querySelectorAll('[data-testid="msg-container"]');
-              messages.forEach(msg => this.handleNewMessage(msg));
+              
+              // 也检查子节点中的消息
+              const messages = node.querySelectorAll('.message-in, .message-out');
+              if (messages.length > 0) {
+                console.log(`[Translation] Found ${messages.length} messages in added node`);
+                messages.forEach(msg => {
+                  if (!msg.querySelector('.wa-translation-result')) {
+                    this.handleNewMessage(msg);
+                  }
+                });
+              }
             }
           });
         });
       });
 
-      // 开始观察
-      this.messageObserver.observe(chatContainer, {
+      // 开始观察整个 #main 容器
+      this.messageObserver.observe(mainContainer, {
         childList: true,
         subtree: true
       });
 
-      // 处理已存在的消息
-      const existingMessages = chatContainer.querySelectorAll('[data-testid="msg-container"], .message-in, .message-out');
+      // 处理当前聊天窗口中已存在的消息
+      this.translateExistingMessages();
+    },
+
+    /**
+     * 翻译已存在的消息
+     */
+    translateExistingMessages() {
+      const existingMessages = document.querySelectorAll('.message-in, .message-out');
+      console.log(`[Translation] Found ${existingMessages.length} existing messages`);
+      
       existingMessages.forEach(msg => {
         if (!msg.querySelector('.wa-translation-result')) {
           this.handleNewMessage(msg);
@@ -196,18 +230,27 @@
      */
     async handleNewMessage(messageNode) {
       try {
+        // 检查配置是否加载
+        if (!this.config || !this.config.global) {
+          console.log('[Translation] Config not loaded yet, skipping');
+          return;
+        }
+
         // 检查是否已经翻译过
         if (messageNode.querySelector('.wa-translation-result')) {
+          console.log('[Translation] Message already translated, skipping');
           return;
         }
 
         // 检查自动翻译是否启用
         if (!this.config.global.autoTranslate) {
+          console.log('[Translation] Auto translate disabled, skipping');
           return;
         }
 
         // 检查是否是群组消息
         if (this.isGroupChat() && !this.config.global.groupTranslation) {
+          console.log('[Translation] Group translation disabled, skipping');
           return;
         }
 
@@ -217,10 +260,12 @@
                            messageNode.querySelector('[data-testid="conversation-text"]');
 
         if (!textElement || !textElement.textContent.trim()) {
+          console.log('[Translation] No text found in message, skipping');
           return;
         }
 
         const messageText = textElement.textContent.trim();
+        console.log('[Translation] Translating message:', messageText.substring(0, 50) + '...');
 
         // 翻译消息
         await this.translateMessage(messageNode, messageText);
@@ -551,6 +596,87 @@
     },
 
     /**
+     * 启动定期检查新消息
+     */
+    startPeriodicCheck() {
+      console.log('[Translation] Starting periodic message check');
+      
+      // 每1秒检查一次新消息
+      setInterval(() => {
+        if (this.config && this.config.global && this.config.global.autoTranslate) {
+          const messages = document.querySelectorAll('.message-in, .message-out');
+          let newCount = 0;
+          
+          messages.forEach(msg => {
+            if (!msg.querySelector('.wa-translation-result')) {
+              const textElement = msg.querySelector('.selectable-text');
+              if (textElement && textElement.textContent.trim()) {
+                this.handleNewMessage(msg);
+                newCount++;
+              }
+            }
+          });
+          
+          if (newCount > 0) {
+            console.log(`[Translation] Found ${newCount} new messages to translate`);
+          }
+        }
+      }, 1000);
+    },
+
+    /**
+     * 监听聊天窗口切换
+     */
+    observeChatSwitch() {
+      console.log('[Translation] Setting up chat switch observer');
+      
+      // 监听 URL 变化（WhatsApp Web 使用 hash 路由）
+      let lastUrl = location.href;
+      const urlObserver = new MutationObserver(() => {
+        const currentUrl = location.href;
+        if (currentUrl !== lastUrl) {
+          lastUrl = currentUrl;
+          console.log('[Translation] Chat switched, re-translating messages');
+          
+          // 延迟一下，等待新聊天加载
+          setTimeout(() => {
+            this.translateExistingMessages();
+            this.observeInputBox(); // 重新设置输入框
+          }, 500);
+        }
+      });
+
+      // 观察 document.body 的变化
+      urlObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // 也监听 #main 容器的变化
+      const mainContainer = document.querySelector('#main');
+      if (mainContainer) {
+        const chatObserver = new MutationObserver((mutations) => {
+          // 检查是否有大的 DOM 变化（可能是切换聊天）
+          const hasSignificantChange = mutations.some(m => 
+            m.addedNodes.length > 5 || m.removedNodes.length > 5
+          );
+          
+          if (hasSignificantChange) {
+            console.log('[Translation] Significant DOM change detected');
+            setTimeout(() => {
+              this.translateExistingMessages();
+            }, 300);
+          }
+        });
+
+        chatObserver.observe(mainContainer, {
+          childList: true,
+          subtree: false // 只观察直接子节点
+        });
+      }
+    },
+
+    /**
      * 注入样式
      */
     injectStyles() {
@@ -747,7 +873,31 @@
   // 初始化
   WhatsAppTranslation.init();
 
-  // 暴露到全局（用于调试）
+  // 暴露到全局（用于调试和手动触发）
   window.WhatsAppTranslation = WhatsAppTranslation;
+
+  // 添加全局快捷函数
+  window.translateCurrentChat = function() {
+    console.log('[Translation] Manually translating current chat...');
+    WhatsAppTranslation.translateExistingMessages();
+  };
+
+  // 监听点击事件（点击聊天列表时）
+  document.addEventListener('click', function(e) {
+    // 检查是否点击了聊天列表项
+    const chatItem = e.target.closest('[data-testid="cell-frame-container"]') ||
+                     e.target.closest('._ak8l') ||
+                     e.target.closest('[role="listitem"]');
+    
+    if (chatItem) {
+      console.log('[Translation] Chat item clicked, will translate after delay');
+      // 延迟翻译，等待聊天加载
+      setTimeout(() => {
+        WhatsAppTranslation.translateExistingMessages();
+      }, 1000);
+    }
+  }, true);
+
+  console.log('[Translation] Global functions exposed: window.translateCurrentChat()');
 
 })();
