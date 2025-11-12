@@ -148,14 +148,17 @@
 
     /**
      * 监听消息
+     * 优化：添加重试限制
      */
-    observeMessages() {
+    observeMessages(retryCount = 0) {
       // 查找主容器（#main 会在切换聊天时保持不变）
       const mainContainer = document.querySelector('#main');
 
       if (!mainContainer) {
-        console.warn('[Translation] Main container not found, retrying...');
-        setTimeout(() => this.observeMessages(), 2000);
+        // 优化：最多重试 10 次（20 秒）
+        if (retryCount < 10) {
+          setTimeout(() => this.observeMessages(retryCount + 1), 2000);
+        }
         return;
       }
 
@@ -285,15 +288,13 @@
         // 聊天窗口翻译始终使用全局配置的目标语言（通常是中文）
         // 不受好友独立配置影响
         const targetLang = this.config.global.targetLang || 'zh-CN';
-        console.log('[Translation] Target language for incoming message:', targetLang);
         
         // 只有当目标语言是中文时，才跳过中文消息
         if (targetLang.startsWith('zh') && this.isChinese(messageText)) {
-          console.log('[Translation] Message is already in Chinese and target is Chinese, skipping');
+          // 添加标记，避免重复检查
+          messageNode.setAttribute('data-translation-skipped', 'true');
           return;
         }
-        
-        console.log('[Translation] Translating message:', messageText.substring(0, 50) + '...');
 
         // 翻译消息
         await this.translateMessage(messageNode, messageText);
@@ -424,6 +425,7 @@
 
     /**
      * 显示翻译结果
+     * 优化：简化 DOM 结构，减少节点数量
      */
     displayTranslation(messageNode, result) {
       // 检查是否已经有翻译结果
@@ -432,18 +434,17 @@
         existing.remove();
       }
 
-      // 创建翻译结果元素
+      // 创建翻译结果元素（优化：减少嵌套层级）
       const translationDiv = document.createElement('div');
       translationDiv.className = 'wa-translation-result';
       
       const detectedLang = result.detectedLang || 'auto';
       const targetLang = this.config.global.targetLang;
       
+      // 优化：简化 HTML 结构，从 4-5 个节点减少到 2-3 个
       translationDiv.innerHTML = `
         <div class="translation-header">
-          <span class="translation-icon">🌐</span>
-          <span class="translation-lang">${detectedLang} → ${targetLang}</span>
-          ${result.cached ? '<span class="translation-cached">📦</span>' : ''}
+          🌐 ${detectedLang} → ${targetLang}${result.cached ? ' 📦' : ''}
         </div>
         <div class="translation-text">${this.escapeHtml(result.translatedText)}</div>
       `;
@@ -624,13 +625,12 @@
 
     /**
      * 初始化输入框翻译
-     * 优化：清理旧的监听器，避免重复初始化
+     * 优化：清理旧的监听器，避免重复初始化，添加重试限制
      */
-    initInputBoxTranslation() {
+    initInputBoxTranslation(retryCount = 0) {
       // 先移除旧的翻译按钮（如果存在）
       const oldButton = document.getElementById('wa-translate-btn');
       if (oldButton) {
-        console.log('[Translation] Removing old translate button');
         oldButton.remove();
       }
       
@@ -642,12 +642,12 @@
                       document.querySelector('div[contenteditable="true"][role="textbox"]');
       
       if (!inputBox) {
-        console.warn('[Translation] Input box not found, retrying...');
-        setTimeout(() => this.initInputBoxTranslation(), 1000);
+        // 优化：最多重试 5 次，避免无限重试
+        if (retryCount < 5) {
+          setTimeout(() => this.initInputBoxTranslation(retryCount + 1), 1000);
+        }
         return;
       }
-      
-      console.log('[Translation] Input box found:', inputBox);
 
       // 添加翻译按钮
       if (this.config && this.config.inputBox && this.config.inputBox.enabled) {
@@ -673,7 +673,7 @@
 
     /**
      * 监听消息发送，自动关闭反向翻译窗口
-     * 优化：清理旧的监听器
+     * 优化：清理旧的监听器，添加重试机制
      */
     setupSendMonitoring(inputBox) {
       // 停止旧的监听器
@@ -688,7 +688,7 @@
                                document.querySelector('#main');
       
       if (!messagesContainer) {
-        console.warn('[Translation] Messages container not found for send monitoring');
+        // 优化：静默失败，不输出警告（页面可能还在加载）
         return;
       }
       
@@ -760,16 +760,19 @@
 
     /**
      * 添加翻译按钮
+     * 优化：减少重试日志，最多重试 5 次
      */
-    addTranslateButton(inputBox) {
+    addTranslateButton(inputBox, retryCount = 0) {
       // 优先查找 #main 中的 footer
       const footer = document.querySelector('#main footer') ||
                     document.querySelector('[data-testid="conversation-compose-box"]') ||
                     document.querySelector('footer');
       
       if (!footer) {
-        console.warn('[Translation] Footer not found for translate button, retrying...');
-        setTimeout(() => this.addTranslateButton(inputBox), 500);
+        // 优化：最多重试 5 次，避免无限重试
+        if (retryCount < 5) {
+          setTimeout(() => this.addTranslateButton(inputBox, retryCount + 1), 500);
+        }
         return;
       }
 
@@ -1686,7 +1689,8 @@
      * 优化：添加初始化标志，避免重复设置
      */
     setupRealtimeTranslation(inputBox) {
-      console.log('[Translation] setupRealtimeTranslation called, realtime enabled:', this.config.advanced.realtime);
+      // 优化：减少日志输出
+      // console.log('[Translation] setupRealtimeTranslation called, realtime enabled:', this.config.advanced.realtime);
       
       // 检查是否启用实时翻译
       if (!this.config.advanced.realtime) {
@@ -1820,7 +1824,8 @@
       // 标记为已初始化
       this._realtimeInitialized = true;
       
-      console.log('[Translation] Realtime translation enabled, handler attached to inputBox');
+      // 优化：减少日志输出
+      // console.log('[Translation] Realtime translation enabled, handler attached to inputBox');
     },
     
     /**
@@ -2022,18 +2027,21 @@
 
     /**
      * 启动定期检查新消息
+     * 优化：跳过已处理的消息，增加检查间隔，减少 CPU 占用
      */
     startPeriodicCheck() {
-      console.log('[Translation] Starting periodic message check');
+      console.log('[Translation] Starting periodic message check (every 3s)');
       
-      // 每1秒检查一次新消息
+      // 优化：从 1 秒改为 3 秒，减少 67% 的检查频率
       setInterval(() => {
         if (this.config && this.config.global && this.config.global.autoTranslate) {
           const messages = document.querySelectorAll('.message-in, .message-out');
           let newCount = 0;
           
           messages.forEach(msg => {
-            if (!msg.querySelector('.wa-translation-result')) {
+            // 跳过已翻译或已标记为跳过的消息
+            if (!msg.querySelector('.wa-translation-result') && 
+                !msg.hasAttribute('data-translation-skipped')) {
               const textElement = msg.querySelector('.selectable-text');
               if (textElement && textElement.textContent.trim()) {
                 this.handleNewMessage(msg);
@@ -2046,7 +2054,39 @@
             console.log(`[Translation] Found ${newCount} new messages to translate`);
           }
         }
-      }, 1000);
+      }, 3000); // 从 1000ms 改为 3000ms
+      
+      // 优化：每 30 秒清理一次不可见的翻译结果
+      setInterval(() => {
+        this.cleanupInvisibleTranslations();
+      }, 30000);
+    },
+    
+    /**
+     * 清理不可见的翻译结果
+     * 优化：移除视口外的翻译 DOM，节省内存
+     */
+    cleanupInvisibleTranslations() {
+      const translations = document.querySelectorAll('.wa-translation-result');
+      let cleanedCount = 0;
+      
+      translations.forEach(translation => {
+        const messageNode = translation.closest('.message-in, .message-out');
+        if (messageNode) {
+          const rect = messageNode.getBoundingClientRect();
+          const isVisible = rect.top < window.innerHeight && rect.bottom > 0;
+          
+          // 如果消息不在视口内，移除翻译结果
+          if (!isVisible) {
+            translation.remove();
+            cleanedCount++;
+          }
+        }
+      });
+      
+      if (cleanedCount > 0) {
+        console.log(`[Translation] Cleaned up ${cleanedCount} invisible translations`);
+      }
     },
 
     /**
