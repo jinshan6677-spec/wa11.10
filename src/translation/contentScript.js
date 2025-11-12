@@ -285,6 +285,57 @@
     },
 
     /**
+     * 获取当前聊天的联系人 ID
+     */
+    getCurrentContactId() {
+      try {
+        // 尝试从 URL 获取联系人 ID
+        const urlMatch = window.location.href.match(/\/chat\/([^/]+)/);
+        if (urlMatch && urlMatch[1]) {
+          return urlMatch[1];
+        }
+        
+        // 备选：从聊天标题获取
+        const header = document.querySelector('[data-testid="conversation-info-header"]');
+        if (header) {
+          const title = header.textContent.trim();
+          return title; // 使用标题作为 ID
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('[Translation] Error getting contact ID:', error);
+        return null;
+      }
+    },
+
+    /**
+     * 获取联系人的翻译配置（优先使用独立配置）
+     */
+    getContactConfig(contactId) {
+      // 如果没有启用好友独立配置，返回全局配置
+      if (!this.config.advanced.friendIndependent) {
+        return this.config.global;
+      }
+      
+      // 检查是否有该联系人的独立配置
+      if (contactId && this.config.friendConfigs && this.config.friendConfigs[contactId]) {
+        const friendConfig = this.config.friendConfigs[contactId];
+        if (friendConfig.enabled) {
+          console.log('[Translation] Using friend-specific config for:', contactId);
+          return {
+            ...this.config.global,
+            targetLang: friendConfig.targetLang || this.config.global.targetLang,
+            blockChinese: friendConfig.blockChinese !== undefined ? friendConfig.blockChinese : this.config.advanced.blockChinese
+          };
+        }
+      }
+      
+      // 返回全局配置
+      return this.config.global;
+    },
+
+    /**
      * 翻译消息
      */
     async translateMessage(messageNode, text) {
@@ -294,11 +345,17 @@
           return;
         }
 
+        // 获取当前联系人 ID
+        const contactId = this.getCurrentContactId();
+        
+        // 获取该联系人的配置（可能是独立配置）
+        const contactConfig = this.getContactConfig(contactId);
+
         const response = await window.translationAPI.translate({
           text: text,
-          sourceLang: this.config.global.sourceLang,
-          targetLang: this.config.global.targetLang,
-          engineName: this.config.global.engine,
+          sourceLang: contactConfig.sourceLang || 'auto',
+          targetLang: contactConfig.targetLang,
+          engineName: contactConfig.engine || this.config.global.engine,
           options: {}
         });
 
@@ -332,13 +389,19 @@
       const detectedLang = result.detectedLang || 'auto';
       const targetLang = this.config.global.targetLang;
       
+      // 添加反向翻译按钮（如果启用）
+      const reverseBtn = this.config.advanced.reverseTranslation ? 
+        '<button class="wa-reverse-translate-btn" title="反向翻译验证">🔄</button>' : '';
+      
       translationDiv.innerHTML = `
         <div class="translation-header">
           <span class="translation-icon">🌐</span>
           <span class="translation-lang">${detectedLang} → ${targetLang}</span>
           ${result.cached ? '<span class="translation-cached">📦</span>' : ''}
+          ${reverseBtn}
         </div>
         <div class="translation-text">${this.escapeHtml(result.translatedText)}</div>
+        <div class="reverse-translation-container" style="display: none;"></div>
       `;
 
       // 找到消息内容容器
@@ -352,6 +415,166 @@
       } else {
         messageNode.appendChild(translationDiv);
       }
+      
+      // 绑定反向翻译按钮事件
+      if (this.config.advanced.reverseTranslation) {
+        const reverseBtnEl = translationDiv.querySelector('.wa-reverse-translate-btn');
+        if (reverseBtnEl) {
+          reverseBtnEl.onclick = () => {
+            this.performReverseTranslation(messageNode, result.translatedText, detectedLang);
+          };
+        }
+      }
+    },
+
+    /**
+     * 执行反向翻译
+     */
+    async performReverseTranslation(messageNode, translatedText, originalLang) {
+      try {
+        const translationDiv = messageNode.querySelector('.wa-translation-result');
+        if (!translationDiv) return;
+        
+        const reverseContainer = translationDiv.querySelector('.reverse-translation-container');
+        if (!reverseContainer) return;
+        
+        // 显示加载状态
+        reverseContainer.style.display = 'block';
+        reverseContainer.innerHTML = `
+          <div class="reverse-translation-header">
+            <span class="translation-icon">🔄</span>
+            <span>反向翻译验证中...</span>
+          </div>
+        `;
+        
+        // 获取原文
+        const textElement = messageNode.querySelector('.selectable-text[dir="ltr"], .selectable-text[dir="rtl"]') ||
+                           messageNode.querySelector('.selectable-text');
+        const originalText = textElement ? textElement.textContent.trim() : '';
+        
+        if (!originalText) {
+          reverseContainer.innerHTML = `
+            <div class="reverse-translation-error">
+              <span class="translation-icon">⚠️</span>
+              <span>无法获取原文</span>
+            </div>
+          `;
+          return;
+        }
+        
+        // 执行反向翻译
+        const response = await window.translationAPI.translate({
+          text: translatedText,
+          sourceLang: this.config.global.targetLang,
+          targetLang: originalLang || 'auto',
+          engineName: this.config.global.engine,
+          options: {}
+        });
+        
+        if (response.success) {
+          const reverseText = response.data.translatedText;
+          
+          // 计算相似度
+          const similarity = this.calculateSimilarity(originalText, reverseText);
+          const similarityPercent = Math.round(similarity * 100);
+          
+          // 判断是否需要警告
+          const needsWarning = similarityPercent < 70;
+          
+          reverseContainer.innerHTML = `
+            <div class="reverse-translation-header">
+              <span class="translation-icon">🔄</span>
+              <span>反向翻译验证</span>
+              <span class="similarity-badge ${needsWarning ? 'warning' : 'good'}">
+                相似度: ${similarityPercent}%
+              </span>
+            </div>
+            <div class="reverse-comparison">
+              <div class="comparison-item">
+                <div class="comparison-label">原文:</div>
+                <div class="comparison-text">${this.escapeHtml(originalText)}</div>
+              </div>
+              <div class="comparison-item">
+                <div class="comparison-label">反向翻译:</div>
+                <div class="comparison-text">${this.escapeHtml(reverseText)}</div>
+              </div>
+            </div>
+            ${needsWarning ? '<div class="reverse-warning">⚠️ 相似度较低，翻译可能不够准确</div>' : ''}
+          `;
+        } else {
+          reverseContainer.innerHTML = `
+            <div class="reverse-translation-error">
+              <span class="translation-icon">⚠️</span>
+              <span>反向翻译失败: ${response.error}</span>
+            </div>
+          `;
+        }
+      } catch (error) {
+        console.error('[Translation] Reverse translation error:', error);
+        const reverseContainer = messageNode.querySelector('.reverse-translation-container');
+        if (reverseContainer) {
+          reverseContainer.innerHTML = `
+            <div class="reverse-translation-error">
+              <span class="translation-icon">⚠️</span>
+              <span>反向翻译失败: ${error.message}</span>
+            </div>
+          `;
+        }
+      }
+    },
+
+    /**
+     * 计算两个文本的相似度（简单的 Levenshtein 距离）
+     */
+    calculateSimilarity(text1, text2) {
+      // 转换为小写并去除标点符号
+      const normalize = (text) => {
+        return text.toLowerCase()
+          .replace(/[^\w\s\u4e00-\u9fa5]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+      
+      const s1 = normalize(text1);
+      const s2 = normalize(text2);
+      
+      // 如果完全相同
+      if (s1 === s2) return 1.0;
+      
+      // 计算 Levenshtein 距离
+      const len1 = s1.length;
+      const len2 = s2.length;
+      
+      if (len1 === 0) return len2 === 0 ? 1.0 : 0.0;
+      if (len2 === 0) return 0.0;
+      
+      const matrix = [];
+      
+      // 初始化矩阵
+      for (let i = 0; i <= len1; i++) {
+        matrix[i] = [i];
+      }
+      for (let j = 0; j <= len2; j++) {
+        matrix[0][j] = j;
+      }
+      
+      // 填充矩阵
+      for (let i = 1; i <= len1; i++) {
+        for (let j = 1; j <= len2; j++) {
+          const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j] + 1,      // 删除
+            matrix[i][j - 1] + 1,      // 插入
+            matrix[i - 1][j - 1] + cost // 替换
+          );
+        }
+      }
+      
+      const distance = matrix[len1][len2];
+      const maxLen = Math.max(len1, len2);
+      
+      // 返回相似度（0-1）
+      return 1 - (distance / maxLen);
     },
 
     /**
@@ -409,56 +632,224 @@
       
       // 初始化输入框翻译
       this.initInputBoxTranslation();
+      
+      // 设置持续监控，确保按钮始终存在
+      this.startButtonMonitoring();
+    },
+
+    /**
+     * 持续监控翻译按钮，确保它始终存在
+     */
+    startButtonMonitoring() {
+      // 如果已经有监控器在运行，先停止
+      if (this.buttonMonitor) {
+        this.buttonMonitor.disconnect();
+      }
+      
+      console.log('[Translation] Starting button monitoring');
+      
+      // 每秒检查一次按钮是否存在
+      this.buttonCheckInterval = setInterval(() => {
+        if (!this.config || !this.config.inputBox || !this.config.inputBox.enabled) {
+          return;
+        }
+        
+        const button = document.getElementById('wa-translate-btn');
+        const footer = document.querySelector('#main footer');
+        
+        // 如果按钮不存在，或者不在正确的 footer 中
+        if (!button || (footer && !footer.contains(button))) {
+          console.log('[Translation] Button missing or in wrong location, re-adding...');
+          
+          // 移除旧按钮（如果存在但位置不对）
+          if (button) {
+            button.remove();
+          }
+          
+          // 重新初始化
+          this.initInputBoxTranslation();
+        }
+      }, 1000);
+      
+      // 也使用 MutationObserver 监控 #main 的变化
+      const mainContainer = document.querySelector('#main');
+      if (mainContainer) {
+        this.buttonMonitor = new MutationObserver((mutations) => {
+          // 检查是否有 footer 相关的变化
+          const hasFooterChange = mutations.some(m => {
+            return Array.from(m.addedNodes).some(node => 
+              node.nodeName === 'FOOTER' || 
+              (node.querySelector && node.querySelector('footer'))
+            ) || Array.from(m.removedNodes).some(node =>
+              node.nodeName === 'FOOTER' ||
+              (node.querySelector && node.querySelector('footer'))
+            );
+          });
+          
+          if (hasFooterChange) {
+            console.log('[Translation] Footer changed, re-adding button...');
+            setTimeout(() => {
+              this.initInputBoxTranslation();
+            }, 200);
+          }
+        });
+        
+        this.buttonMonitor.observe(mainContainer, {
+          childList: true,
+          subtree: true
+        });
+      }
     },
 
     /**
      * 初始化输入框翻译
      */
     initInputBoxTranslation() {
-      // 查找输入框 - 使用多个选择器尝试
-      const inputBox = document.querySelector('footer [contenteditable="true"]') ||
+      // 先移除旧的翻译按钮（如果存在）
+      const oldButton = document.getElementById('wa-translate-btn');
+      if (oldButton) {
+        console.log('[Translation] Removing old translate button');
+        oldButton.remove();
+      }
+      
+      // 查找输入框 - 使用多个选择器尝试，优先查找 #main 中的
+      const inputBox = document.querySelector('#main footer [contenteditable="true"]') ||
+                      document.querySelector('footer [contenteditable="true"]') ||
                       document.querySelector('[data-testid="conversation-compose-box-input"]') ||
                       document.querySelector('[contenteditable="true"][data-tab="10"]') ||
-                      document.querySelector('div[contenteditable="true"][role="textbox"]') ||
-                      document.querySelector('#main footer div[contenteditable="true"]');
+                      document.querySelector('div[contenteditable="true"][role="textbox"]');
       
       if (!inputBox) {
         console.warn('[Translation] Input box not found, retrying...');
-        setTimeout(() => this.initInputBoxTranslation(), 2000);
+        setTimeout(() => this.initInputBoxTranslation(), 1000);
         return;
       }
       
       console.log('[Translation] Input box found:', inputBox);
 
       // 添加翻译按钮
-      if (this.config.inputBox.enabled) {
+      if (this.config && this.config.inputBox && this.config.inputBox.enabled) {
         this.addTranslateButton(inputBox);
+      } else {
+        console.log('[Translation] Input box translation disabled in config');
       }
 
       // 设置实时翻译
-      if (this.config.advanced.realtime) {
+      if (this.config && this.config.advanced && this.config.advanced.realtime) {
         this.setupRealtimeTranslation(inputBox);
       }
 
-      // 中文拦截功能已移除
+      // 设置中文拦截
+      this.setupChineseBlock();
+      
+      // 监听消息发送，自动关闭反向翻译窗口
+      this.setupSendMonitoring(inputBox);
+    },
+
+    /**
+     * 监听消息发送，自动关闭反向翻译窗口
+     */
+    setupSendMonitoring(inputBox) {
+      // 停止旧的监听器
+      if (this.messageSentObserver) {
+        this.messageSentObserver.disconnect();
+      }
+      
+      // 查找消息容器
+      const messagesContainer = document.querySelector('[data-testid="conversation-panel-messages"]') ||
+                               document.querySelector('#main [role="application"]') ||
+                               document.querySelector('#main');
+      
+      if (!messagesContainer) {
+        console.warn('[Translation] Messages container not found for send monitoring');
+        return;
+      }
+      
+      console.log('[Translation] Setting up message sent monitoring');
+      
+      // 使用 MutationObserver 监控新消息的添加
+      this.messageSentObserver = new MutationObserver((mutations) => {
+        // 首先检查是否有反向翻译窗口，如果没有就不需要处理
+        const reverseWindow = document.querySelector('.wa-input-reverse-translation');
+        if (!reverseWindow) {
+          return;
+        }
+        
+        // 检查是否有新的发送消息节点被添加
+        const hasNewOutgoingMessage = mutations.some(mutation => {
+          return Array.from(mutation.addedNodes).some(node => {
+            if (node.nodeType === 1) {
+              // 只检查发送的消息（绿色气泡，message-out）
+              // 排除接收的消息（白色气泡，message-in）
+              const isOutgoing = node.classList && node.classList.contains('message-out');
+              const hasOutgoing = node.querySelector && node.querySelector('.message-out');
+              
+              if (isOutgoing || hasOutgoing) {
+                console.log('[Translation] Detected new OUTGOING message (green bubble)');
+                return true;
+              }
+              return false;
+            }
+            return false;
+          });
+        });
+        
+        if (hasNewOutgoingMessage) {
+          console.log('[Translation] Closing reverse translation after sending message');
+          // 延迟一下确保消息已完全发送
+          setTimeout(() => {
+            this.closeReverseTranslation();
+          }, 100);
+        }
+      });
+      
+      // 开始监控
+      this.messageSentObserver.observe(messagesContainer, {
+        childList: true,
+        subtree: true
+      });
+      
+      console.log('[Translation] Message sent monitoring enabled');
+    },
+
+    /**
+     * 关闭反向翻译窗口
+     */
+    closeReverseTranslation() {
+      const reverseDiv = document.querySelector('.wa-input-reverse-translation');
+      if (reverseDiv) {
+        console.log('[Translation] Closing reverse translation window');
+        reverseDiv.style.animation = 'slideUp 0.3s ease';
+        setTimeout(() => {
+          if (reverseDiv.parentNode) {
+            reverseDiv.remove();
+          }
+        }, 300);
+      }
+      
+      // 同时关闭实时翻译预览
+      this.hideRealtimePreview();
     },
 
     /**
      * 添加翻译按钮
      */
     addTranslateButton(inputBox) {
+      // 优先查找 #main 中的 footer
       const footer = document.querySelector('#main footer') ||
                     document.querySelector('[data-testid="conversation-compose-box"]') ||
                     document.querySelector('footer');
       
       if (!footer) {
-        console.warn('[Translation] Footer not found for translate button');
+        console.warn('[Translation] Footer not found for translate button, retrying...');
+        setTimeout(() => this.addTranslateButton(inputBox), 500);
         return;
       }
 
-      // 检查按钮是否已存在
-      if (document.getElementById('wa-translate-btn')) {
-        console.log('[Translation] Translate button already exists');
+      // 再次检查按钮是否已存在（双重保险）
+      const existingButton = document.getElementById('wa-translate-btn');
+      if (existingButton) {
+        console.log('[Translation] Translate button already exists, skipping');
         return;
       }
 
@@ -491,35 +882,43 @@
         }
       };
 
-      // 添加按钮样式
+      // 添加按钮样式 - 固定在输入框上方
       button.style.cssText = `
+        position: fixed;
+        bottom: 80px;
+        right: 20px;
         padding: 8px;
-        background: transparent;
+        background: rgba(102, 126, 234, 0.95);
         border: none;
         cursor: pointer;
-        font-size: 20px;
+        font-size: 22px;
         border-radius: 50%;
-        transition: background 0.2s;
+        transition: all 0.2s;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       `;
 
       button.onmouseenter = () => {
-        button.style.background = 'rgba(0, 0, 0, 0.05)';
+        button.style.background = 'rgba(102, 126, 234, 1)';
+        button.style.transform = 'scale(1.15)';
+        button.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.4)';
       };
 
       button.onmouseleave = () => {
-        button.style.background = 'transparent';
+        button.style.background = 'rgba(102, 126, 234, 0.95)';
+        button.style.transform = 'scale(1)';
+        button.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.2)';
       };
 
-      const attachButton = footer.querySelector('[data-testid="clip"]') ||
-                          footer.querySelector('[data-icon="clip"]');
-      
-      if (attachButton && attachButton.parentNode) {
-        attachButton.parentNode.insertBefore(button, attachButton.nextSibling);
-      } else {
-        footer.appendChild(button);
-      }
+      // 直接添加到 body 中（固定定位，不依赖 footer）
+      document.body.appendChild(button);
 
-      console.log('[Translation] Translate button added');
+      console.log('[Translation] Translate button added (floating position)');
     },
 
     /**
@@ -651,6 +1050,257 @@
     },
 
     /**
+     * 检查是否应该拦截中文（考虑全局和联系人配置）
+     */
+    shouldBlockChinese() {
+      // 获取当前联系人 ID
+      const contactId = this.getCurrentContactId();
+      
+      // 如果启用了好友独立配置，检查该联系人的配置
+      if (this.config.advanced.friendIndependent && contactId) {
+        const friendConfig = this.config.friendConfigs && this.config.friendConfigs[contactId];
+        if (friendConfig && friendConfig.enabled) {
+          // 使用联系人的独立配置
+          return friendConfig.blockChinese || false;
+        }
+      }
+      
+      // 使用全局配置
+      return this.config.advanced.blockChinese || false;
+    },
+
+    /**
+     * 设置中文拦截
+     */
+    setupChineseBlock() {
+      // 移除旧的监听器
+      if (this.chineseBlockHandler) {
+        document.removeEventListener('keydown', this.chineseBlockHandler, true);
+      }
+      if (this.chineseBlockClickHandler) {
+        document.removeEventListener('click', this.chineseBlockClickHandler, true);
+      }
+      
+      // 检查是否需要启用拦截
+      if (!this.shouldBlockChinese()) {
+        console.log('[Translation] Chinese blocking disabled');
+        return;
+      }
+      
+      console.log('[Translation] Setting up Chinese blocking');
+      
+      // 创建键盘监听器（拦截 Enter 键发送）
+      this.chineseBlockHandler = (e) => {
+        // 检测 Enter 键（发送消息）
+        if (e.key === 'Enter' && !e.shiftKey) {
+          const inputBox = document.querySelector('footer [contenteditable="true"]') ||
+                          document.querySelector('[data-testid="conversation-compose-box-input"]');
+          
+          if (!inputBox) return;
+          
+          const text = inputBox.textContent || inputBox.innerText || '';
+          
+          if (this.containsChinese(text)) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            
+            // 显示提示
+            this.showChineseBlockAlert();
+            
+            console.log('[Translation] Blocked Chinese message send via Enter');
+            return false;
+          }
+        }
+      };
+      
+      // 创建点击监听器（拦截发送按钮点击）
+      this.chineseBlockClickHandler = (e) => {
+        // 检查是否点击了发送按钮
+        const target = e.target;
+        const sendButton = target.closest('[data-testid="send"]') || 
+                          target.closest('button[aria-label*="发送"]') ||
+                          target.closest('button[aria-label*="Send"]') ||
+                          target.closest('span[data-icon="send"]');
+        
+        if (sendButton) {
+          const inputBox = document.querySelector('footer [contenteditable="true"]') ||
+                          document.querySelector('[data-testid="conversation-compose-box-input"]');
+          
+          if (!inputBox) return;
+          
+          const text = inputBox.textContent || inputBox.innerText || '';
+          
+          if (this.containsChinese(text)) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            
+            // 显示提示
+            this.showChineseBlockAlert();
+            
+            console.log('[Translation] Blocked Chinese message send via button');
+            return false;
+          }
+        }
+      };
+      
+      // 添加监听器（使用 capture 阶段，优先级最高）
+      document.addEventListener('keydown', this.chineseBlockHandler, true);
+      document.addEventListener('click', this.chineseBlockClickHandler, true);
+      
+      console.log('[Translation] Chinese blocking enabled');
+    },
+
+    /**
+     * 显示非阻塞提示消息
+     */
+    showToast(message, type = 'info') {
+      // 创建提示元素
+      const toast = document.createElement('div');
+      toast.className = 'wa-toast wa-toast-' + type;
+      toast.textContent = message;
+      
+      toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 500;
+        font-size: 14px;
+        z-index: 10000000;
+        animation: slideInRight 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        max-width: 300px;
+      `;
+      
+      // 根据类型设置背景色
+      if (type === 'error') {
+        toast.style.background = '#ef4444';
+      } else if (type === 'warning') {
+        toast.style.background = '#f59e0b';
+      } else if (type === 'success') {
+        toast.style.background = '#10b981';
+      } else {
+        toast.style.background = '#3b82f6';
+      }
+      
+      document.body.appendChild(toast);
+      
+      // 2秒后自动移除
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.style.animation = 'fadeOut 0.3s ease';
+          setTimeout(() => {
+            if (toast.parentNode) {
+              toast.parentNode.removeChild(toast);
+            }
+          }, 300);
+        }
+      }, 2000);
+    },
+
+    /**
+     * 显示中文拦截提示
+     */
+    showChineseBlockAlert() {
+      // 创建提示元素
+      const alert = document.createElement('div');
+      alert.className = 'wa-chinese-block-alert';
+      alert.innerHTML = `
+        <div class="alert-content">
+          <span class="alert-icon">🚫</span>
+          <div class="alert-text">
+            <strong>检测到中文内容</strong>
+            <p>已启用禁发中文功能，请先翻译后再发送</p>
+          </div>
+          <button class="alert-close">×</button>
+        </div>
+      `;
+      
+      alert.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #fff3cd;
+        border: 2px solid #ffc107;
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 10000000;
+        animation: slideInRight 0.3s ease;
+        max-width: 350px;
+      `;
+      
+      const content = alert.querySelector('.alert-content');
+      content.style.cssText = `
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      `;
+      
+      const icon = alert.querySelector('.alert-icon');
+      icon.style.cssText = `
+        font-size: 24px;
+        flex-shrink: 0;
+      `;
+      
+      const text = alert.querySelector('.alert-text');
+      text.style.cssText = `
+        flex: 1;
+      `;
+      
+      const strong = alert.querySelector('strong');
+      strong.style.cssText = `
+        display: block;
+        color: #856404;
+        margin-bottom: 4px;
+        font-size: 14px;
+      `;
+      
+      const p = alert.querySelector('p');
+      p.style.cssText = `
+        margin: 0;
+        color: #856404;
+        font-size: 13px;
+        line-height: 1.4;
+      `;
+      
+      const closeBtn = alert.querySelector('.alert-close');
+      closeBtn.style.cssText = `
+        background: transparent;
+        border: none;
+        font-size: 24px;
+        color: #856404;
+        cursor: pointer;
+        padding: 0;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      `;
+      
+      closeBtn.onclick = () => {
+        if (alert.parentNode) {
+          alert.parentNode.removeChild(alert);
+        }
+      };
+      
+      document.body.appendChild(alert);
+      
+      // 3秒后自动移除
+      setTimeout(() => {
+        if (alert.parentNode) {
+          alert.parentNode.removeChild(alert);
+        }
+      }, 3000);
+    },
+
+    /**
      * 翻译输入框
      */
     async translateInputBox(inputBox) {
@@ -670,7 +1320,7 @@
       }
       
       if (!inputBox) {
-        alert('找不到输入框');
+        this.showToast('找不到输入框', 'error');
         console.error('[Translation] Input box not found');
         this.isTranslating = false;
         return;
@@ -695,13 +1345,12 @@
       text = text.trim();
       
       if (!text) {
-        alert('请输入要翻译的内容');
+        this.showToast('请输入要翻译的内容', 'warning');
+        this.isTranslating = false;
         return;
       }
       
       console.log('[Translation] Translating input box text:', text);
-
-      // 禁发中文功能已移除
 
       try {
         const button = document.getElementById('wa-translate-btn');
@@ -737,20 +1386,153 @@
         });
 
         if (response.success) {
-          console.log('[Translation] Translation successful:', response.data.translatedText);
-          await this.setInputBoxText(inputBox, response.data.translatedText);
+          const translatedText = response.data.translatedText;
+          console.log('[Translation] Translation successful:', translatedText);
+          
+          // 将翻译后的文本设置到输入框
+          await this.setInputBoxText(inputBox, translatedText);
           console.log('[Translation] Text set to input box');
+          
+          // 如果启用了反向翻译，显示反向翻译验证
+          if (this.config.advanced.reverseTranslation) {
+            await this.showInputBoxReverseTranslation(text, translatedText, targetLang);
+          }
         } else {
           console.error('[Translation] Translation failed:', response.error);
-          alert('翻译失败: ' + response.error);
+          this.showToast('翻译失败: ' + response.error, 'error');
         }
 
       } catch (error) {
         console.error('[Translation] Input box translation error:', error);
-        alert('翻译失败: ' + error.message);
+        this.showToast('翻译失败: ' + error.message, 'error');
       } finally {
         // 释放翻译锁
         this.isTranslating = false;
+      }
+    },
+
+    /**
+     * 显示输入框反向翻译验证
+     */
+    async showInputBoxReverseTranslation(originalText, translatedText, targetLang) {
+      try {
+        // 移除旧的反向翻译显示
+        const oldReverse = document.querySelector('.wa-input-reverse-translation');
+        if (oldReverse) {
+          oldReverse.remove();
+        }
+        
+        // 查找输入框容器
+        const footer = document.querySelector('#main footer') ||
+                      document.querySelector('[data-testid="conversation-compose-box"]') ||
+                      document.querySelector('footer');
+        
+        if (!footer) {
+          console.warn('[Translation] Footer not found for reverse translation');
+          return;
+        }
+        
+        // 创建反向翻译容器
+        const reverseDiv = document.createElement('div');
+        reverseDiv.className = 'wa-input-reverse-translation';
+        reverseDiv.innerHTML = `
+          <div class="reverse-header">
+            <span class="reverse-icon">🔄</span>
+            <span class="reverse-title">反向翻译验证中...</span>
+            <button class="reverse-close" title="关闭">×</button>
+          </div>
+          <div class="reverse-content"></div>
+        `;
+        
+        // 添加样式
+        reverseDiv.style.cssText = `
+          margin: 8px 12px;
+          padding: 12px;
+          background: rgba(156, 39, 176, 0.05);
+          border-left: 3px solid #9c27b0;
+          border-radius: 8px;
+          font-size: 13px;
+        `;
+        
+        // 插入到输入框上方
+        footer.insertBefore(reverseDiv, footer.firstChild);
+        
+        // 绑定关闭按钮
+        const closeBtn = reverseDiv.querySelector('.reverse-close');
+        closeBtn.onclick = () => {
+          reverseDiv.remove();
+        };
+        
+        // 先检测原文的语言
+        let sourceLang = 'zh-CN'; // 默认中文
+        try {
+          const detectResult = await window.translationAPI.detectLanguage(originalText);
+          if (detectResult.success && detectResult.data.language) {
+            sourceLang = detectResult.data.language;
+            console.log('[Translation] Detected original language:', sourceLang);
+          }
+        } catch (error) {
+          console.warn('[Translation] Language detection failed, using default zh-CN:', error);
+        }
+        
+        // 执行反向翻译 - 翻译回原始语言
+        const response = await window.translationAPI.translate({
+          text: translatedText,
+          sourceLang: targetLang,
+          targetLang: sourceLang, // 翻译回原始语言
+          engineName: this.config.global.engine,
+          options: {}
+        });
+        
+        if (response.success) {
+          const reverseText = response.data.translatedText;
+          
+          // 计算相似度
+          const similarity = this.calculateSimilarity(originalText, reverseText);
+          const similarityPercent = Math.round(similarity * 100);
+          const needsWarning = similarityPercent < 70;
+          
+          // 更新显示
+          const header = reverseDiv.querySelector('.reverse-header');
+          const content = reverseDiv.querySelector('.reverse-content');
+          
+          header.innerHTML = `
+            <span class="reverse-icon">🔄</span>
+            <span class="reverse-title">反向翻译验证</span>
+            <span class="similarity-badge ${needsWarning ? 'warning' : 'good'}">
+              相似度: ${similarityPercent}%
+            </span>
+            <button class="reverse-close" title="关闭">×</button>
+          `;
+          
+          content.innerHTML = `
+            <div class="reverse-item">
+              <div class="reverse-label">实时翻译</div>
+              <div class="reverse-text">${this.escapeHtml(translatedText)}</div>
+            </div>
+            <div class="reverse-item">
+              <div class="reverse-label">反向结果</div>
+              <div class="reverse-text">${this.escapeHtml(reverseText)}</div>
+            </div>
+            ${needsWarning ? '<div class="reverse-warning">⚠️ 相似度较低，翻译可能不够准确</div>' : ''}
+          `;
+          
+          // 重新绑定关闭按钮
+          const newCloseBtn = reverseDiv.querySelector('.reverse-close');
+          newCloseBtn.onclick = () => {
+            reverseDiv.remove();
+          };
+        } else {
+          const content = reverseDiv.querySelector('.reverse-content');
+          content.innerHTML = `
+            <div class="reverse-error">
+              <span>⚠️</span>
+              <span>反向翻译失败: ${response.error}</span>
+            </div>
+          `;
+        }
+      } catch (error) {
+        console.error('[Translation] Input box reverse translation error:', error);
       }
     },
 
@@ -831,8 +1613,187 @@
      * 设置实时翻译
      */
     setupRealtimeTranslation(inputBox) {
-      // 简化版实时翻译，暂不实现
-      console.log('[Translation] Realtime translation setup (placeholder)');
+      // 移除旧的监听器
+      if (this.realtimeInputHandler) {
+        inputBox.removeEventListener('input', this.realtimeInputHandler);
+      }
+      
+      // 检查是否启用实时翻译
+      if (!this.config.advanced.realtime) {
+        console.log('[Translation] Realtime translation disabled');
+        // 移除预览元素
+        const preview = document.querySelector('.wa-realtime-preview');
+        if (preview) {
+          preview.remove();
+        }
+        return;
+      }
+      
+      console.log('[Translation] Setting up realtime translation');
+      
+      let debounceTimer = null;
+      let lastText = '';
+      
+      // 创建预览元素
+      this.createRealtimePreview();
+      
+      // 创建输入监听器
+      this.realtimeInputHandler = () => {
+        // 清除之前的定时器
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+        
+        // 获取当前文本
+        let text = '';
+        if (inputBox.hasAttribute('data-lexical-editor')) {
+          const textNodes = inputBox.querySelectorAll('p, span[data-text="true"]');
+          if (textNodes.length > 0) {
+            text = Array.from(textNodes).map(node => node.textContent).join('\n');
+          } else {
+            text = inputBox.innerText || inputBox.textContent || '';
+          }
+        } else {
+          text = inputBox.textContent || inputBox.innerText || '';
+        }
+        
+        text = text.trim();
+        
+        // 如果文本为空，隐藏预览
+        if (!text) {
+          this.hideRealtimePreview();
+          lastText = '';
+          return;
+        }
+        
+        // 如果文本没有变化，不翻译
+        if (text === lastText) {
+          return;
+        }
+        
+        lastText = text;
+        
+        // 显示加载状态
+        this.showRealtimePreview('翻译中...', true);
+        
+        // 500ms 后执行翻译
+        debounceTimer = setTimeout(async () => {
+          try {
+            // 从配置中获取输入框翻译目标语言
+            let targetLang = this.config.inputBox.targetLang || 'auto';
+            
+            // 如果设置为自动检测，则检测对方使用的语言
+            if (targetLang === 'auto') {
+              targetLang = await this.detectChatLanguage();
+            }
+            
+            // 如果还是检测不到，默认翻译成英文
+            if (!targetLang || targetLang === 'auto') {
+              targetLang = 'en';
+            }
+            
+            const response = await window.translationAPI.translate({
+              text: text,
+              sourceLang: 'auto',
+              targetLang: targetLang,
+              engineName: this.config.global.engine,
+              options: {
+                style: this.config.inputBox.style
+              }
+            });
+            
+            if (response.success) {
+              this.showRealtimePreview(response.data.translatedText, false);
+            } else {
+              this.showRealtimePreview('翻译失败: ' + response.error, false, true);
+            }
+          } catch (error) {
+            console.error('[Translation] Realtime translation error:', error);
+            this.showRealtimePreview('翻译失败: ' + error.message, false, true);
+          }
+        }, 500);
+      };
+      
+      // 添加监听器
+      inputBox.addEventListener('input', this.realtimeInputHandler);
+      
+      console.log('[Translation] Realtime translation enabled');
+    },
+
+    /**
+     * 创建实时翻译预览元素
+     */
+    createRealtimePreview() {
+      // 检查是否已存在
+      if (document.querySelector('.wa-realtime-preview')) {
+        return;
+      }
+      
+      // 查找输入框容器
+      const footer = document.querySelector('#main footer') ||
+                    document.querySelector('[data-testid="conversation-compose-box"]') ||
+                    document.querySelector('footer');
+      
+      if (!footer) {
+        console.warn('[Translation] Footer not found for realtime preview');
+        return;
+      }
+      
+      // 创建预览元素
+      const preview = document.createElement('div');
+      preview.className = 'wa-realtime-preview';
+      preview.style.display = 'none';
+      preview.innerHTML = `
+        <div class="translation-header">
+          <span class="translation-icon">⚡</span>
+          <span class="translation-lang">实时翻译预览</span>
+        </div>
+        <div class="translation-text"></div>
+      `;
+      
+      // 插入到输入框上方
+      footer.insertBefore(preview, footer.firstChild);
+      
+      console.log('[Translation] Realtime preview element created');
+    },
+
+    /**
+     * 显示实时翻译预览
+     */
+    showRealtimePreview(text, isLoading = false, isError = false) {
+      const preview = document.querySelector('.wa-realtime-preview');
+      if (!preview) {
+        this.createRealtimePreview();
+        return this.showRealtimePreview(text, isLoading, isError);
+      }
+      
+      const textElement = preview.querySelector('.translation-text');
+      if (textElement) {
+        if (isLoading) {
+          textElement.innerHTML = '<span class="translation-loading">' + this.escapeHtml(text) + '</span>';
+        } else if (isError) {
+          textElement.innerHTML = '<span style="color: #ef4444;">' + this.escapeHtml(text) + '</span>';
+        } else {
+          textElement.textContent = text;
+        }
+      }
+      
+      preview.style.display = 'block';
+    },
+
+    /**
+     * 隐藏实时翻译预览
+     */
+    hideRealtimePreview() {
+      const preview = document.querySelector('.wa-realtime-preview');
+      if (preview) {
+        preview.style.display = 'none';
+        // 清空预览内容，避免下次显示时出现旧内容
+        const textElement = preview.querySelector('.translation-text');
+        if (textElement) {
+          textElement.textContent = '';
+        }
+      }
     },
 
     /**
@@ -1016,6 +1977,58 @@
     },
 
     /**
+     * 显示联系人独立配置标识
+     */
+    showFriendConfigIndicator() {
+      // 移除旧的标识
+      const oldIndicator = document.querySelector('.wa-friend-config-indicator');
+      if (oldIndicator) {
+        oldIndicator.remove();
+      }
+      
+      // 检查是否启用好友独立配置
+      if (!this.config.advanced.friendIndependent) {
+        return;
+      }
+      
+      // 获取当前联系人 ID
+      const contactId = this.getCurrentContactId();
+      if (!contactId) {
+        return;
+      }
+      
+      // 检查该联系人是否有独立配置
+      const friendConfig = this.config.friendConfigs && this.config.friendConfigs[contactId];
+      if (!friendConfig || !friendConfig.enabled) {
+        return;
+      }
+      
+      // 查找聊天标题区域
+      const header = document.querySelector('[data-testid="conversation-info-header"]');
+      if (!header) {
+        return;
+      }
+      
+      // 创建标识
+      const indicator = document.createElement('span');
+      indicator.className = 'wa-friend-config-indicator';
+      indicator.innerHTML = '🎯';
+      indicator.title = `独立翻译配置：${friendConfig.targetLang}${friendConfig.blockChinese ? ' (禁发中文)' : ''}`;
+      indicator.style.cssText = `
+        display: inline-block;
+        margin-left: 8px;
+        font-size: 16px;
+        cursor: help;
+        animation: fadeIn 0.3s ease-in;
+      `;
+      
+      // 添加到标题后面
+      header.appendChild(indicator);
+      
+      console.log('[Translation] Friend config indicator added for:', contactId);
+    },
+
+    /**
      * 监听聊天窗口切换
      */
     observeChatSwitch() {
@@ -1033,6 +2046,7 @@
           setTimeout(() => {
             this.translateExistingMessages();
             this.observeInputBox(); // 重新设置输入框
+            this.showFriendConfigIndicator(); // 显示独立配置标识
           }, 500);
         }
       });
@@ -1056,6 +2070,8 @@
             console.log('[Translation] Significant DOM change detected');
             setTimeout(() => {
               this.translateExistingMessages();
+              this.observeInputBox(); // 重新设置输入框和翻译按钮
+              this.showFriendConfigIndicator(); // 显示独立配置标识
             }, 300);
           }
         });
@@ -1065,6 +2081,11 @@
           subtree: false // 只观察直接子节点
         });
       }
+      
+      // 初始显示标识
+      setTimeout(() => {
+        this.showFriendConfigIndicator();
+      }, 1000);
     },
 
     /**
@@ -1175,6 +2196,203 @@
         .wa-realtime-preview .translation-loading {
           color: #667781;
           font-style: italic;
+        }
+
+        /* 反向翻译按钮 */
+        .wa-reverse-translate-btn {
+          background: transparent;
+          border: 1px solid rgba(0, 0, 0, 0.1);
+          border-radius: 4px;
+          padding: 2px 8px;
+          font-size: 12px;
+          cursor: pointer;
+          margin-left: auto;
+          transition: all 0.2s;
+        }
+
+        .wa-reverse-translate-btn:hover {
+          background: rgba(0, 0, 0, 0.05);
+          transform: scale(1.05);
+        }
+
+        /* 反向翻译容器 */
+        .reverse-translation-container {
+          margin-top: 12px;
+          padding: 12px;
+          background: rgba(156, 39, 176, 0.05);
+          border-left: 3px solid #9c27b0;
+          border-radius: 8px;
+        }
+
+        /* 输入框反向翻译样式 */
+        .wa-input-reverse-translation {
+          animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes slideUp {
+          from {
+            opacity: 1;
+            transform: translateY(0);
+          }
+          to {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+        }
+
+        .reverse-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 12px;
+          font-weight: 500;
+        }
+
+        .reverse-icon {
+          font-size: 16px;
+        }
+
+        .reverse-title {
+          color: #9c27b0;
+          font-size: 13px;
+        }
+
+        .reverse-close {
+          margin-left: auto;
+          background: transparent;
+          border: none;
+          font-size: 20px;
+          color: #667781;
+          cursor: pointer;
+          padding: 0;
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          transition: background 0.2s;
+        }
+
+        .reverse-close:hover {
+          background: rgba(0, 0, 0, 0.05);
+        }
+
+        .reverse-content {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .reverse-item {
+          background: rgba(255, 255, 255, 0.5);
+          padding: 8px;
+          border-radius: 4px;
+        }
+
+        .reverse-label {
+          font-size: 11px;
+          color: #667781;
+          font-weight: 600;
+          margin-bottom: 4px;
+        }
+
+        .reverse-text {
+          font-size: 13px;
+          color: #111b21;
+          line-height: 1.4;
+        }
+
+        .reverse-error {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: #ef4444;
+          font-size: 12px;
+        }
+
+        .reverse-translation-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 8px;
+          font-size: 12px;
+          color: #9c27b0;
+          font-weight: 500;
+        }
+
+        .similarity-badge {
+          margin-left: auto;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        .similarity-badge.good {
+          background: #4caf50;
+          color: white;
+        }
+
+        .similarity-badge.warning {
+          background: #ff9800;
+          color: white;
+        }
+
+        .reverse-comparison {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .comparison-item {
+          background: rgba(255, 255, 255, 0.5);
+          padding: 8px;
+          border-radius: 4px;
+        }
+
+        .comparison-label {
+          font-size: 11px;
+          color: #667781;
+          font-weight: 600;
+          margin-bottom: 4px;
+        }
+
+        .comparison-text {
+          font-size: 13px;
+          color: #111b21;
+          line-height: 1.4;
+        }
+
+        .reverse-warning {
+          margin-top: 8px;
+          padding: 8px;
+          background: rgba(255, 152, 0, 0.1);
+          border-radius: 4px;
+          font-size: 12px;
+          color: #f57c00;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .reverse-translation-error {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: #ef4444;
+          font-size: 12px;
         }
 
         /* 深色模式支持 */
@@ -1512,6 +2730,15 @@
           }
         }
 
+        @keyframes fadeOut {
+          from {
+            opacity: 1;
+          }
+          to {
+            opacity: 0;
+          }
+        }
+
         /* 设置按钮样式 */
         .wa-settings-btn {
           padding: 8px;
@@ -1603,6 +2830,21 @@
       if (this.inputObserver) {
         this.inputObserver.disconnect();
         this.inputObserver = null;
+      }
+
+      if (this.buttonMonitor) {
+        this.buttonMonitor.disconnect();
+        this.buttonMonitor = null;
+      }
+
+      if (this.buttonCheckInterval) {
+        clearInterval(this.buttonCheckInterval);
+        this.buttonCheckInterval = null;
+      }
+
+      if (this.messageSentObserver) {
+        this.messageSentObserver.disconnect();
+        this.messageSentObserver = null;
       }
 
       const styles = document.getElementById('wa-translation-styles');
@@ -1802,6 +3044,68 @@
                 </label>
                 <p class="setting-desc">为不同联系人设置独立的翻译配置</p>
               </div>
+              
+              <div class="setting-item">
+                <label class="setting-label">
+                  <input type="checkbox" id="realtimeTranslation" class="setting-checkbox">
+                  <span class="setting-title">实时翻译预览</span>
+                </label>
+                <p class="setting-desc">输入时实时显示翻译预览</p>
+              </div>
+              
+              <div class="setting-item">
+                <label class="setting-label">
+                  <input type="checkbox" id="reverseTranslation" class="setting-checkbox">
+                  <span class="setting-title">反向翻译验证</span>
+                </label>
+                <p class="setting-desc">显示反向翻译以验证准确性</p>
+              </div>
+            </div>
+            
+            <!-- 好友独立配置 -->
+            <div class="settings-section" id="friendConfigSection" style="display: none;">
+              <h3>👥 当前联系人配置</h3>
+              
+              <div class="setting-item">
+                <label class="setting-label">
+                  <input type="checkbox" id="currentFriendEnabled" class="setting-checkbox">
+                  <span class="setting-title">为当前联系人启用独立配置</span>
+                </label>
+                <p class="setting-desc" id="currentContactName">当前联系人：未知</p>
+              </div>
+              
+              <div id="friendConfigOptions" style="display: none;">
+                <div class="setting-item">
+                  <label class="setting-title">目标语言</label>
+                  <select id="friendTargetLang" class="setting-select">
+                    <option value="zh-CN">中文简体</option>
+                    <option value="zh-TW">中文繁体</option>
+                    <option value="en">English</option>
+                    <option value="ja">日本語</option>
+                    <option value="ko">한국어</option>
+                    <option value="es">Español</option>
+                    <option value="fr">Français</option>
+                    <option value="de">Deutsch</option>
+                    <option value="ru">Русский</option>
+                    <option value="ar">العربية</option>
+                    <option value="pt">Português</option>
+                    <option value="it">Italiano</option>
+                  </select>
+                  <p class="setting-desc">该联系人消息的翻译目标语言</p>
+                </div>
+                
+                <div class="setting-item">
+                  <label class="setting-label">
+                    <input type="checkbox" id="friendBlockChinese" class="setting-checkbox">
+                    <span class="setting-title">对该联系人禁发中文</span>
+                  </label>
+                  <p class="setting-desc">向该联系人发送消息时拦截中文</p>
+                </div>
+              </div>
+              
+              <div class="setting-item">
+                <button id="manageFriendsBtn" class="setting-button secondary">管理所有联系人配置</button>
+              </div>
             </div>
             
             <!-- API 配置 -->
@@ -1896,6 +3200,24 @@
       clearCacheBtn.addEventListener('click', () => {
         this.clearCache();
       });
+      
+      // 好友独立配置开关
+      const friendIndependentCheckbox = this.panel.querySelector('#friendIndependent');
+      friendIndependentCheckbox.addEventListener('change', () => {
+        this.updateFriendConfigVisibility();
+      });
+      
+      // 当前好友配置开关
+      const currentFriendCheckbox = this.panel.querySelector('#currentFriendEnabled');
+      currentFriendCheckbox.addEventListener('change', () => {
+        this.updateFriendConfigOptions();
+      });
+      
+      // 管理所有联系人配置按钮
+      const manageFriendsBtn = this.panel.querySelector('#manageFriendsBtn');
+      manageFriendsBtn.addEventListener('click', () => {
+        this.showFriendConfigManager();
+      });
     }
 
     /**
@@ -1968,6 +3290,12 @@
       // 高级设置
       this.panel.querySelector('#blockChinese').checked = this.config.advanced.blockChinese;
       this.panel.querySelector('#friendIndependent').checked = this.config.advanced.friendIndependent;
+      this.panel.querySelector('#realtimeTranslation').checked = this.config.advanced.realtime || false;
+      this.panel.querySelector('#reverseTranslation').checked = this.config.advanced.reverseTranslation || false;
+
+      // 更新好友配置显示
+      this.updateFriendConfigVisibility();
+      this.loadCurrentFriendConfig();
 
       // 加载统计信息
       this.loadStats();
@@ -2033,6 +3361,9 @@
      */
     async saveSettings() {
       try {
+        // 保存当前联系人配置
+        this.saveCurrentFriendConfig();
+        
         // 收集表单数据
         const newConfig = {
           global: {
@@ -2050,8 +3381,8 @@
           advanced: {
             friendIndependent: this.panel.querySelector('#friendIndependent').checked,
             blockChinese: this.panel.querySelector('#blockChinese').checked,
-            realtime: false,
-            reverseTranslation: false,
+            realtime: this.panel.querySelector('#realtimeTranslation').checked,
+            reverseTranslation: this.panel.querySelector('#reverseTranslation').checked,
             voiceTranslation: false,
             imageTranslation: false
           },
@@ -2175,6 +3506,120 @@
       } catch (error) {
         console.error('[Settings] Failed to load stats:', error);
       }
+    }
+
+    /**
+     * 更新好友配置区域显示
+     */
+    updateFriendConfigVisibility() {
+      const friendIndependent = this.panel.querySelector('#friendIndependent').checked;
+      const friendConfigSection = this.panel.querySelector('#friendConfigSection');
+      
+      if (friendIndependent) {
+        friendConfigSection.style.display = 'block';
+      } else {
+        friendConfigSection.style.display = 'none';
+      }
+    }
+
+    /**
+     * 更新好友配置选项显示
+     */
+    updateFriendConfigOptions() {
+      const enabled = this.panel.querySelector('#currentFriendEnabled').checked;
+      const options = this.panel.querySelector('#friendConfigOptions');
+      
+      if (enabled) {
+        options.style.display = 'block';
+      } else {
+        options.style.display = 'none';
+      }
+    }
+
+    /**
+     * 加载当前联系人配置
+     */
+    loadCurrentFriendConfig() {
+      const contactId = window.WhatsAppTranslation.getCurrentContactId();
+      
+      if (!contactId) {
+        this.panel.querySelector('#currentContactName').textContent = '当前联系人：未打开聊天窗口';
+        this.panel.querySelector('#currentFriendEnabled').disabled = true;
+        return;
+      }
+      
+      // 显示联系人名称
+      const header = document.querySelector('[data-testid="conversation-info-header"]');
+      const contactName = header ? header.textContent.trim() : contactId;
+      this.panel.querySelector('#currentContactName').textContent = `当前联系人：${contactName}`;
+      this.panel.querySelector('#currentFriendEnabled').disabled = false;
+      
+      // 加载该联系人的配置
+      const friendConfig = this.config.friendConfigs && this.config.friendConfigs[contactId];
+      
+      if (friendConfig && friendConfig.enabled) {
+        this.panel.querySelector('#currentFriendEnabled').checked = true;
+        this.panel.querySelector('#friendTargetLang').value = friendConfig.targetLang || 'en';
+        this.panel.querySelector('#friendBlockChinese').checked = friendConfig.blockChinese || false;
+        this.updateFriendConfigOptions();
+      } else {
+        this.panel.querySelector('#currentFriendEnabled').checked = false;
+        this.panel.querySelector('#friendTargetLang').value = 'en';
+        this.panel.querySelector('#friendBlockChinese').checked = false;
+        this.updateFriendConfigOptions();
+      }
+    }
+
+    /**
+     * 保存当前联系人配置
+     */
+    saveCurrentFriendConfig() {
+      const contactId = window.WhatsAppTranslation.getCurrentContactId();
+      
+      if (!contactId) {
+        return;
+      }
+      
+      if (!this.config.friendConfigs) {
+        this.config.friendConfigs = {};
+      }
+      
+      const enabled = this.panel.querySelector('#currentFriendEnabled').checked;
+      
+      if (enabled) {
+        this.config.friendConfigs[contactId] = {
+          enabled: true,
+          targetLang: this.panel.querySelector('#friendTargetLang').value,
+          blockChinese: this.panel.querySelector('#friendBlockChinese').checked
+        };
+      } else {
+        // 删除该联系人的配置
+        delete this.config.friendConfigs[contactId];
+      }
+    }
+
+    /**
+     * 显示好友配置管理器
+     */
+    showFriendConfigManager() {
+      const friendConfigs = this.config.friendConfigs || {};
+      const configCount = Object.keys(friendConfigs).length;
+      
+      let message = `已配置 ${configCount} 个联系人的独立翻译设置\n\n`;
+      
+      if (configCount > 0) {
+        message += '配置列表：\n';
+        for (const [contactId, config] of Object.entries(friendConfigs)) {
+          if (config.enabled) {
+            message += `• ${contactId}: ${config.targetLang}${config.blockChinese ? ' (禁发中文)' : ''}\n`;
+          }
+        }
+        message += '\n要清除某个联系人的配置，请打开该聊天窗口，在设置中取消勾选"为当前联系人启用独立配置"';
+      } else {
+        message += '暂无配置的联系人\n\n要为联系人设置独立配置，请打开该聊天窗口，在设置中勾选"为当前联系人启用独立配置"';
+      }
+      
+      alert(message);
     }
 
     /**
