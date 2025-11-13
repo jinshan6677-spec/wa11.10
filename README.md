@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)
 
-基于 whatsapp-web.js 的容器化 WhatsApp 桌面应用程序。
+基于 Electron 的 WhatsApp 桌面应用程序，支持实时翻译功能。
 
 [功能特性](#核心特性) • [快速开始](#快速开始) • [文档](#文档) • [测试](#测试)
 
@@ -17,22 +17,23 @@
 
 ## 项目概述
 
-本项目将 WhatsApp Web 封装为独立的桌面应用程序，并支持容器化部署。用户可以在 Electron 窗口中直接使用完整的官方 WhatsApp Web 界面。
+本项目将 WhatsApp Web 封装为独立的桌面应用程序，提供实时翻译功能。用户可以在 Electron 窗口中直接使用完整的官方 WhatsApp Web 界面，并享受强大的翻译支持。
 
 ### 核心特性
 
 - ✅ 完整的 WhatsApp Web 功能
-- ✅ 会话持久化（无需重复扫码）
-- ✅ Docker 容器化支持
+- ✅ 实时消息翻译（支持多种翻译引擎）
+- ✅ 输入框翻译（发送前翻译）
+- ✅ 好友独立翻译配置
+- ✅ 中文消息拦截
 - ✅ 跨平台支持（Windows、macOS、Linux）
 - 🔮 未来支持多账号
-- 🔮 未来支持消息翻译
 
 ## 技术栈
 
 - **Electron 39.1.1** - 桌面应用框架（Chromium 132.x + Node.js 20.x）
-- **whatsapp-web.js 1.23.0** - WhatsApp Web 客户端库
-- **Docker** - 容器化部署
+- **翻译引擎** - 支持 Google 翻译、GPT-4、Gemini、DeepSeek 等
+- **Docker** - 容器化部署（可选）
 - **Node.js 18+** - 运行时环境（推荐 20.x）
 
 ## 快速开始
@@ -60,6 +61,7 @@ npm run dev
 2. 首次使用需要用手机扫描二维码登录
 3. 登录后会话会自动保存，下次启动无需重新扫码
 4. 所有 WhatsApp 功能都可以正常使用
+5. 翻译功能会自动注入到页面中，可在设置中配置
 
 ### 容器部署
 

@@ -1,12 +1,10 @@
 /**
  * WhatsApp Desktop - Electron 主进程
  * 
- * 这个应用将 WhatsApp Web 封装为桌面应用，并使用 whatsapp-web.js
- * 在后台处理认证和提供 API 支持。
+ * 这个应用将 WhatsApp Web 封装为桌面应用，提供翻译功能支持。
  */
 
 const { app, BrowserWindow } = require('electron');
-const { Client, LocalAuth } = require('whatsapp-web.js');
 const config = require('./config');
 const path = require('path');
 const translationService = require('./translation/translationService');
@@ -14,8 +12,6 @@ const { registerIPCHandlers, unregisterIPCHandlers } = require('./translation/ip
 
 // 全局变量
 let mainWindow = null;
-let client = null;
-let reconnectAttempts = 0;
 
 /**
  * 注入翻译内容脚本
@@ -124,118 +120,10 @@ function createWindow() {
 }
 
 /**
- * 初始化 WhatsApp 客户端
- */
-async function initializeWhatsApp() {
-  log('info', '初始化 WhatsApp 客户端...');
-
-  try {
-    // 创建 whatsapp-web.js 客户端
-    client = new Client({
-      authStrategy: new LocalAuth({
-        dataPath: config.sessionPath
-      }),
-      puppeteer: {
-        headless: true,
-        args: config.puppeteerArgs
-      }
-    });
-
-    // 注册事件监听器
-    registerClientEvents();
-
-    // 初始化客户端
-    await client.initialize();
-    log('info', 'WhatsApp 客户端初始化完成');
-
-  } catch (error) {
-    log('error', 'WhatsApp 客户端初始化失败:', error);
-    throw error;
-  }
-}
-
-/**
- * 注册 WhatsApp 客户端事件监听器
- */
-function registerClientEvents() {
-  // QR 码事件
-  client.on('qr', (qr) => {
-    log('info', 'QR 码已生成，请使用手机扫描登录');
-    log('debug', 'QR 码内容:', qr);
-  });
-
-  // 认证成功事件
-  client.on('authenticated', () => {
-    log('info', '认证成功');
-    reconnectAttempts = 0; // 重置重连计数
-  });
-
-  // 认证失败事件
-  client.on('auth_failure', (message) => {
-    log('error', '认证失败:', message);
-  });
-
-  // 客户端就绪事件
-  client.on('ready', () => {
-    log('info', 'WhatsApp 客户端已就绪，可以正常使用');
-  });
-
-  // 消息事件（为未来扩展预留）
-  client.on('message', async (msg) => {
-    log('debug', `收到消息: ${msg.from} - ${msg.body}`);
-
-    // 这里可以添加自定义逻辑，例如：
-    // - 消息翻译
-    // - 自动回复
-    // - 消息记录
-    // - 关键词触发
-  });
-
-  // 断开连接事件
-  client.on('disconnected', (reason) => {
-    log('warn', '客户端已断开连接:', reason);
-
-    // 如果启用了自动重连
-    if (config.reconnect.enabled && reconnectAttempts < config.reconnect.maxAttempts) {
-      reconnectAttempts++;
-      log('info', `尝试重新连接 (${reconnectAttempts}/${config.reconnect.maxAttempts})...`);
-
-      setTimeout(() => {
-        log('info', '开始重新连接...');
-        client.initialize().catch((error) => {
-          log('error', '重新连接失败:', error);
-        });
-      }, config.reconnect.delay);
-    } else if (reconnectAttempts >= config.reconnect.maxAttempts) {
-      log('error', '已达到最大重连次数，请手动重启应用');
-    }
-  });
-
-  // 加载中事件
-  client.on('loading_screen', (percent, message) => {
-    log('debug', `加载中: ${percent}% - ${message}`);
-  });
-
-  // 状态变化事件
-  client.on('change_state', (state) => {
-    log('debug', '状态变化:', state);
-  });
-}
-
-/**
  * 清理资源
  */
 async function cleanup() {
   log('info', '开始清理资源...');
-
-  if (client) {
-    try {
-      await client.destroy();
-      log('info', 'WhatsApp 客户端已销毁');
-    } catch (error) {
-      log('error', '销毁客户端时出错:', error);
-    }
-  }
 
   // 注销 IPC 处理器
   try {
@@ -283,9 +171,6 @@ app.whenReady().then(async () => {
     // 创建窗口
     createWindow();
 
-    // 初始化 WhatsApp 客户端
-    await initializeWhatsApp();
-
   } catch (error) {
     log('error', '应用启动失败:', error);
     log('error', '错误堆栈:', error.stack);
@@ -318,14 +203,9 @@ app.on('window-all-closed', async () => {
 /**
  * 应用退出前事件
  */
-app.on('before-quit', async (event) => {
+app.on('before-quit', async () => {
   log('info', '应用即将退出');
-
-  if (client) {
-    event.preventDefault();
-    await cleanup();
-    app.exit(0);
-  }
+  await cleanup();
 });
 
 /**

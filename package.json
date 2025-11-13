@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-desktop-container",
   "version": "1.0.0",
-  "description": "WhatsApp Desktop application with containerization support",
+  "description": "WhatsApp Desktop application with translation support",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -27,7 +27,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "whatsapp-web.js": "^1.23.0",
     "electron-store": "^8.1.0",
     "lru-cache": "^10.0.0"
   },

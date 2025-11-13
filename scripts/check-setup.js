@@ -55,10 +55,10 @@ try {
 }
 
 try {
-  require('whatsapp-web.js');
-  console.log('  ✓ whatsapp-web.js');
+  require('electron-store');
+  console.log('  ✓ electron-store');
 } catch (e) {
-  console.log('  ✗ whatsapp-web.js (未安装)');
+  console.log('  ✗ electron-store (未安装)');
   allGood = false;
 }
 console.log();
@@ -69,7 +69,7 @@ try {
   const config = require('../src/config.js');
   console.log(`  ✓ 会话路径: ${config.sessionPath}`);
   console.log(`  ✓ 窗口大小: ${config.windowConfig.width}x${config.windowConfig.height}`);
-  console.log(`  ✓ 重连配置: ${config.reconnect.enabled ? '启用' : '禁用'}`);
+  console.log(`  ✓ 控制台过滤: ${config.consoleFilter.enabled ? '启用' : '禁用'}`);
 } catch (e) {
   console.log('  ✗ 配置文件加载失败');
   console.log(`  错误: ${e.message}`);

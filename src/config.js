@@ -19,18 +19,6 @@ module.exports = {
     }
   },
   
-  // Puppeteer 配置参数
-  puppeteerArgs: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-accelerated-2d-canvas',
-    '--no-first-run',
-    '--no-zygote',
-    '--disable-gpu',
-    '--disable-software-rasterizer'
-  ],
-  
   // 日志级别
   logLevel: process.env.LOG_LEVEL || 'info',
   
@@ -46,12 +34,5 @@ module.exports = {
       'debugjs',
       'fburl.com'
     ]
-  },
-  
-  // 重连配置
-  reconnect: {
-    enabled: true,
-    delay: 5000, // 5秒后重连
-    maxAttempts: 5
   }
 };

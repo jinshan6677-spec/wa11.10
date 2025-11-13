@@ -142,8 +142,8 @@ const checks = [
     const nodeMajor = parseInt(nodeVersion.slice(1).split('.')[0]);
     return nodeMajor >= 18;
   }},
-  { name: 'whatsapp-web.js', check: () => {
-    return packageJson.dependencies['whatsapp-web.js'] !== undefined;
+  { name: '翻译服务', check: () => {
+    return packageJson.dependencies['electron-store'] !== undefined;
   }},
   { name: 'package.json 配置', check: () => {
     return packageJson.main && packageJson.scripts && packageJson.scripts.start;
