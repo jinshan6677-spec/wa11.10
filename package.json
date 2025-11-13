@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --inspect",
+    "prebuild": "node scripts/prepare-build.js",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -21,6 +22,7 @@
     "test:session": "node scripts/check-session.js",
     "test:reconnect": "node scripts/test-reconnect.js",
     "test:clean": "node scripts/clean-session.js",
+    "test:build": "node scripts/test-build.js",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix",
     "docker:build": "docker build -t whatsapp-desktop .",
@@ -72,8 +74,12 @@
       "resources/**/*",
       "!src/**/*.test.js",
       "!src/**/__tests__/**",
-      "!**/*.map"
+      "!**/*.map",
+      "!src/translation/examples/**",
+      "!**/*.md",
+      "!resources/BUILD_NOTES.md"
     ],
+    "asarUnpack": [],
     "extraResources": [
       {
         "from": "docs",
@@ -94,7 +100,7 @@
       ],
       "icon": "resources/icon.ico",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "publisherName": "Your Organization"
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
@@ -183,7 +189,9 @@
       "provider": "github",
       "owner": "your-org",
       "repo": "whatsapp-desktop-translation"
-    }
+    },
+    "afterPack": "./scripts/afterPack.js",
+    "npmRebuild": true
   },
   "jest": {
     "testEnvironment": "node",
