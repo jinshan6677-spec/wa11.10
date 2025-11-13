@@ -4,6 +4,8 @@
  */
 
 const EventEmitter = require('events');
+const ContentSecurity = require('../utils/ContentSecurity');
+const { PerformanceOptimizer } = require('../utils/PerformanceOptimizer');
 
 class TranslationManager extends EventEmitter {
   constructor(configManager, cacheManager) {
@@ -11,6 +13,14 @@ class TranslationManager extends EventEmitter {
     this.engines = new Map();
     this.configManager = configManager;
     this.cacheManager = cacheManager;
+    this.contentSecurity = new ContentSecurity();
+    
+    // 初始化性能优化器
+    this.performanceOptimizer = new PerformanceOptimizer({
+      maxConcurrent: 5,
+      cacheTimeout: 5000
+    });
+    
     this.stats = {
       totalRequests: 0,
       successCount: 0,
@@ -53,6 +63,38 @@ class TranslationManager extends EventEmitter {
   async translate(text, sourceLang, targetLang, engineName, options = {}) {
     const startTime = Date.now();
     this.stats.totalRequests++;
+    
+    // 内容安全检查
+    const cleanInput = this.contentSecurity.cleanTranslationInput(text);
+    if (!cleanInput.valid) {
+      throw new Error(`Invalid input: ${cleanInput.error}`);
+    }
+    
+    // 验证语言代码
+    if (!this.contentSecurity.validateLanguageCode(sourceLang)) {
+      throw new Error(`Invalid source language code: ${sourceLang}`);
+    }
+    if (!this.contentSecurity.validateLanguageCode(targetLang)) {
+      throw new Error(`Invalid target language code: ${targetLang}`);
+    }
+    
+    // 使用清理后的文本
+    const cleanedText = cleanInput.text;
+    
+    // 生成请求唯一标识（用于去重）
+    const requestKey = `${cleanedText}:${sourceLang}:${targetLang}:${engineName}:${JSON.stringify(options)}`;
+    
+    // 使用性能优化器执行请求（带队列和去重）
+    return this.performanceOptimizer.executeRequest(requestKey, async () => {
+      return this._executeTranslation(cleanedText, sourceLang, targetLang, engineName, options, startTime);
+    });
+  }
+
+  /**
+   * 实际执行翻译的内部方法
+   * @private
+   */
+  async _executeTranslation(cleanedText, sourceLang, targetLang, engineName, options, startTime) {
     const maxRetries = 3;
     let currentEngine = engineName;
     let lastError = null;
@@ -61,12 +103,17 @@ class TranslationManager extends EventEmitter {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         // 检查缓存
-        const cacheKey = this.cacheManager.generateKey(text, sourceLang, targetLang, currentEngine);
+        const cacheKey = this.cacheManager.generateKey(cleanedText, sourceLang, targetLang, currentEngine);
         const cached = await this.cacheManager.get(cacheKey);
         
         if (cached) {
-          this.emit('cache-hit', { text, engineName: currentEngine });
-          return { ...cached, cached: true };
+          this.emit('cache-hit', { text: this.contentSecurity.truncateText(cleanedText, 50), engineName: currentEngine });
+          // 清理缓存的输出
+          const safeCached = {
+            ...cached,
+            translatedText: this.contentSecurity.cleanTranslationOutput(cached.translatedText)
+          };
+          return { ...safeCached, cached: true };
         }
 
         // 获取引擎
@@ -80,28 +127,36 @@ class TranslationManager extends EventEmitter {
         }
 
         // 执行翻译
-        const result = await engine.translate(text, sourceLang, targetLang, options);
+        const result = await engine.translate(cleanedText, sourceLang, targetLang, options);
+        
+        // 清理翻译结果
+        const safeResult = {
+          ...result,
+          translatedText: this.contentSecurity.cleanTranslationOutput(result.translatedText)
+        };
       
         // 缓存结果
-        await this.cacheManager.set(cacheKey, result);
+        await this.cacheManager.set(cacheKey, safeResult);
         
         // 更新统计
         this.stats.successCount++;
-        this.stats.totalChars += text.length;
+        this.stats.totalChars += cleanedText.length;
         
         const responseTime = Date.now() - startTime;
         this.emit('translation-success', { 
-          text, 
+          text: this.contentSecurity.truncateText(cleanedText, 50), 
           engineName: currentEngine, 
           responseTime,
-          charCount: text.length 
+          charCount: cleanedText.length 
         });
 
-        return { ...result, cached: false, responseTime };
+        return { ...safeResult, cached: false, responseTime };
 
       } catch (error) {
         lastError = error;
-        console.error(`[TranslationManager] Attempt ${attempt + 1} failed with ${currentEngine}:`, error.message);
+        // 使用安全的日志消息
+        const safeMessage = this.contentSecurity.sanitizeLogMessage(error.message);
+        console.error(`[TranslationManager] Attempt ${attempt + 1} failed with ${currentEngine}:`, safeMessage);
 
         // 如果是第一次失败，尝试降级到备用引擎
         if (attempt === 0) {
@@ -125,9 +180,9 @@ class TranslationManager extends EventEmitter {
     // 所有尝试都失败
     this.stats.failureCount++;
     this.emit('translation-error', { 
-      text, 
+      text: this.contentSecurity.truncateText(cleanedText, 50), 
       engineName, 
-      error: lastError.message 
+      error: this.contentSecurity.sanitizeLogMessage(lastError.message)
     });
     throw lastError;
   }
@@ -217,6 +272,7 @@ class TranslationManager extends EventEmitter {
     return {
       ...this.stats,
       cacheStats: this.cacheManager.getStats(),
+      performanceStats: this.performanceOptimizer.getStats(),
       engines: Array.from(this.engines.keys())
     };
   }
@@ -239,8 +295,84 @@ class TranslationManager extends EventEmitter {
    */
   async cleanup() {
     await this.cacheManager.cleanup();
+    this.performanceOptimizer.cleanup();
     this.engines.clear();
     this.emit('cleanup-complete');
+  }
+
+  /**
+   * 清除所有翻译历史（隐私保护）
+   * 删除缓存数据但保留配置
+   */
+  async clearTranslationHistory() {
+    console.log('[TranslationManager] Clearing translation history...');
+    
+    await this.cacheManager.clearTranslationHistory();
+    this.resetStats();
+    
+    this.emit('history-cleared');
+    console.log('[TranslationManager] Translation history cleared successfully');
+  }
+
+  /**
+   * 清除所有用户数据（隐私保护）
+   * 删除配置和缓存数据
+   */
+  async clearAllUserData() {
+    console.log('[TranslationManager] Clearing all user data...');
+    
+    // 清除翻译历史
+    await this.cacheManager.clearTranslationHistory();
+    
+    // 清除用户配置
+    this.configManager.clearUserData();
+    
+    // 重置统计
+    this.resetStats();
+    
+    this.emit('user-data-cleared');
+    console.log('[TranslationManager] All user data cleared successfully');
+  }
+
+  /**
+   * 清除所有数据包括 API 密钥（完全隐私保护）
+   */
+  async clearAllData() {
+    console.log('[TranslationManager] Clearing all data including API keys...');
+    
+    // 清除翻译历史
+    await this.cacheManager.clearTranslationHistory();
+    
+    // 清除所有配置
+    this.configManager.clearAllSensitiveData();
+    
+    // 重置统计
+    this.resetStats();
+    
+    // 清除引擎
+    this.engines.clear();
+    
+    this.emit('all-data-cleared');
+    console.log('[TranslationManager] All data cleared successfully');
+  }
+
+  /**
+   * 获取隐私数据报告
+   * @returns {Object} 隐私数据统计
+   */
+  getPrivacyReport() {
+    const configSummary = this.configManager.getPrivacyDataSummary();
+    const cacheSize = this.cacheManager.getCacheSize();
+    
+    return {
+      config: configSummary,
+      cache: cacheSize,
+      stats: this.stats,
+      dataLocations: {
+        config: configSummary.storageLocation,
+        cache: this.cacheManager.cacheDir
+      }
+    };
   }
 }
 

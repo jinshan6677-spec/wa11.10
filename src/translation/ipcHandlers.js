@@ -119,6 +119,74 @@ function registerIPCHandlers() {
     }
   });
 
+  // 隐私保护：清除翻译历史
+  ipcMain.handle('translation:clearHistory', async (event) => {
+    try {
+      await translationService.clearTranslationHistory();
+      return {
+        success: true,
+        message: 'Translation history cleared successfully'
+      };
+    } catch (error) {
+      console.error('[IPC] Clear history error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 隐私保护：清除用户数据
+  ipcMain.handle('translation:clearUserData', async (event) => {
+    try {
+      await translationService.clearAllUserData();
+      return {
+        success: true,
+        message: 'User data cleared successfully'
+      };
+    } catch (error) {
+      console.error('[IPC] Clear user data error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 隐私保护：清除所有数据
+  ipcMain.handle('translation:clearAllData', async (event) => {
+    try {
+      await translationService.clearAllData();
+      return {
+        success: true,
+        message: 'All data cleared successfully'
+      };
+    } catch (error) {
+      console.error('[IPC] Clear all data error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 隐私保护：获取隐私报告
+  ipcMain.handle('translation:getPrivacyReport', async (event) => {
+    try {
+      const report = translationService.getPrivacyReport();
+      return {
+        success: true,
+        data: report
+      };
+    } catch (error) {
+      console.error('[IPC] Get privacy report error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
   console.log('[IPC] Translation handlers registered');
 }
 
@@ -132,6 +200,10 @@ function unregisterIPCHandlers() {
   ipcMain.removeHandler('translation:saveConfig');
   ipcMain.removeHandler('translation:getStats');
   ipcMain.removeHandler('translation:clearCache');
+  ipcMain.removeHandler('translation:clearHistory');
+  ipcMain.removeHandler('translation:clearUserData');
+  ipcMain.removeHandler('translation:clearAllData');
+  ipcMain.removeHandler('translation:getPrivacyReport');
   
   console.log('[IPC] Translation handlers unregistered');
 }

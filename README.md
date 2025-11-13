@@ -150,15 +150,46 @@ npm run version
 - 📖 [UPGRADE_SUMMARY.md](UPGRADE_SUMMARY.md) - 升级总结
 - 📖 [UPGRADE_NOTES.md](UPGRADE_NOTES.md) - 详细升级说明
 
-## 测试
+## 📖 文档
 
-本项目提供完整的测试文档和工具。
+### 用户文档
+
+- **[用户指南](docs/USER_GUIDE.md)** - 完整的功能使用说明
+- **[常见问题](docs/FAQ.md)** - 常见问题解答
+- **[翻译引擎配置](docs/USER_GUIDE.md#翻译引擎配置)** - 各引擎配置指南
+
+### 开发者文档
+
+- **[开发者指南](docs/DEVELOPER_GUIDE.md)** - 开发环境设置和工作流
+- **[API 文档](docs/API.md)** - 完整的 API 接口文档
+- **[扩展开发指南](docs/EXTENSION_GUIDE.md)** - 创建翻译引擎插件
+- **[构建和发布指南](docs/BUILD_GUIDE.md)** - 打包和发布流程
 
 ### 测试文档
 
-- **[TEST_README.md](TEST_README.md)** - 测试文档总览
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - 详细测试指南
-- **[TEST_CHECKLIST.md](TEST_CHECKLIST.md)** - 测试检查清单
+- **[测试指南](docs/TESTING_GUIDE.md)** - 详细测试指南
+- **[发布检查清单](docs/RELEASE_CHECKLIST.md)** - 发布前检查清单
+
+### 其他文档
+
+- **[更新日志](CHANGELOG.md)** - 版本更新记录
+- **[安全最佳实践](docs/SECURITY_BEST_PRACTICES.md)** - 安全使用指南
+- **[升级说明](docs/UPGRADE_NOTES.md)** - 版本升级指南
+
+## 测试
+
+### 运行测试
+
+```bash
+# 运行所有测试
+npm test
+
+# 监听模式
+npm run test:watch
+
+# 生成覆盖率报告
+npm run test:coverage
+```
 
 ### 测试工具
 
@@ -176,7 +207,7 @@ npm run test:reconnect
 npm run test:clean
 ```
 
-详细信息请参考 [TEST_README.md](TEST_README.md)。
+详细信息请参考 [测试指南](docs/TESTING_GUIDE.md)。
 
 ## 故障排除
 
@@ -226,26 +257,35 @@ MIT
 ## 📂 项目结构
 
 ```
-whatsapp-desktop-container/
+whatsapp-desktop-translation/
 ├── src/
 │   ├── main.js              # Electron 主进程
-│   └── config.js            # 配置文件
+│   ├── preload.js           # 预加载脚本
+│   ├── config.js            # 配置文件
+│   └── translation/         # 翻译模块
+│       ├── managers/        # 管理器（TranslationManager, ConfigManager, CacheManager）
+│       ├── adapters/        # 翻译引擎适配器
+│       ├── utils/           # 工具类（安全、性能、隐私）
+│       ├── ipcHandlers.js   # IPC 通信处理器
+│       └── contentScript.js # 内容脚本
 ├── scripts/                 # 测试和工具脚本
-│   ├── test-setup.js
-│   ├── check-session.js
-│   ├── test-reconnect.js
-│   ├── clean-session.js
-│   └── check-electron-version.js
-├── docker/
-│   ├── Dockerfile
-│   └── docker-compose.yml
+├── docker/                  # Docker 配置
 ├── resources/               # 应用资源
 ├── .kiro/specs/            # 项目规范文档
 ├── docs/                    # 文档目录
-│   ├── TESTING_GUIDE.md
+│   ├── USER_GUIDE.md        # 用户指南
+│   ├── FAQ.md               # 常见问题
+│   ├── DEVELOPER_GUIDE.md   # 开发者指南
+│   ├── API.md               # API 文档
+│   ├── EXTENSION_GUIDE.md   # 扩展开发指南
+│   ├── BUILD_GUIDE.md       # 构建和发布指南
+│   ├── RELEASE_CHECKLIST.md # 发布检查清单
+│   ├── TESTING_GUIDE.md     # 测试指南
 │   ├── SECURITY_BEST_PRACTICES.md
 │   ├── CONSOLE_ERRORS_EXPLAINED.md
 │   └── UPGRADE_NOTES.md
+├── CHANGELOG.md             # 更新日志
+├── LICENSE                  # 许可证
 └── package.json
 ```
 

@@ -272,6 +272,50 @@ class TranslationService {
     this.initialized = false;
     console.log('[TranslationService] Cleaned up');
   }
+
+  /**
+   * 清除翻译历史（隐私保护）
+   */
+  async clearTranslationHistory() {
+    if (!this.initialized) {
+      throw new Error('Translation service not initialized');
+    }
+
+    return await this.translationManager.clearTranslationHistory();
+  }
+
+  /**
+   * 清除所有用户数据（隐私保护）
+   */
+  async clearAllUserData() {
+    if (!this.initialized) {
+      throw new Error('Translation service not initialized');
+    }
+
+    return await this.translationManager.clearAllUserData();
+  }
+
+  /**
+   * 清除所有数据包括 API 密钥（完全隐私保护）
+   */
+  async clearAllData() {
+    if (!this.initialized) {
+      throw new Error('Translation service not initialized');
+    }
+
+    return await this.translationManager.clearAllData();
+  }
+
+  /**
+   * 获取隐私数据报告
+   */
+  getPrivacyReport() {
+    if (!this.initialized) {
+      throw new Error('Translation service not initialized');
+    }
+
+    return this.translationManager.getPrivacyReport();
+  }
 }
 
 // 导出单例

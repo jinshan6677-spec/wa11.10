@@ -24,10 +24,21 @@ function injectTranslationScript() {
 
   try {
     const fs = require('fs');
-    const scriptPath = path.join(__dirname, 'translation', 'contentScript.js');
-    const scriptContent = fs.readFileSync(scriptPath, 'utf8');
-
-    mainWindow.webContents.executeJavaScript(scriptContent)
+    
+    // 先注入性能优化器
+    const optimizerPath = path.join(__dirname, 'translation', 'contentScriptWithOptimizer.js');
+    const optimizerContent = fs.readFileSync(optimizerPath, 'utf8');
+    
+    mainWindow.webContents.executeJavaScript(optimizerContent)
+      .then(() => {
+        log('info', '性能优化器注入成功');
+        
+        // 然后注入主翻译脚本
+        const scriptPath = path.join(__dirname, 'translation', 'contentScript.js');
+        const scriptContent = fs.readFileSync(scriptPath, 'utf8');
+        
+        return mainWindow.webContents.executeJavaScript(scriptContent);
+      })
       .then(() => {
         log('info', '翻译脚本注入成功');
       })

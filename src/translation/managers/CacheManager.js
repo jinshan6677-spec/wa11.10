@@ -212,6 +212,81 @@ class CacheManager {
   }
 
   /**
+   * 清除翻译历史（隐私保护）
+   * 删除所有缓存数据和统计信息
+   */
+  async clearTranslationHistory() {
+    console.log('[CacheManager] Clearing translation history for privacy...');
+    
+    // 清空内存缓存
+    this.cache.clear();
+    
+    // 清空文件缓存
+    if (this.cacheDir) {
+      try {
+        const files = fs.readdirSync(this.cacheDir);
+        let deletedCount = 0;
+        
+        for (const file of files) {
+          const filePath = path.join(this.cacheDir, file);
+          try {
+            fs.unlinkSync(filePath);
+            deletedCount++;
+          } catch (error) {
+            console.error(`Failed to delete ${file}:`, error.message);
+          }
+        }
+        
+        console.log(`[CacheManager] Deleted ${deletedCount} cache files`);
+      } catch (error) {
+        console.error('[CacheManager] Failed to clear translation history:', error);
+      }
+    }
+    
+    // 重置统计信息
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      sets: 0
+    };
+    
+    console.log('[CacheManager] Translation history cleared successfully');
+  }
+
+  /**
+   * 获取缓存数据大小（用于隐私报告）
+   * @returns {Object} 缓存大小信息
+   */
+  getCacheSize() {
+    let totalSize = 0;
+    let fileCount = 0;
+    
+    if (this.cacheDir) {
+      try {
+        const files = fs.readdirSync(this.cacheDir);
+        
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const filePath = path.join(this.cacheDir, file);
+            const stats = fs.statSync(filePath);
+            totalSize += stats.size;
+            fileCount++;
+          }
+        }
+      } catch (error) {
+        console.error('[CacheManager] Failed to get cache size:', error);
+      }
+    }
+    
+    return {
+      totalBytes: totalSize,
+      totalMB: (totalSize / (1024 * 1024)).toFixed(2),
+      fileCount,
+      memoryEntries: this.cache.size
+    };
+  }
+
+  /**
    * 获取统计信息
    * @returns {Object} 统计数据
    */
