@@ -3014,6 +3014,7 @@
       this.config = null;
       this.isVisible = false;
       this.accountId = null;
+      this.currentEngine = null; // 跟踪当前选择的引擎
     }
 
     /**
@@ -3397,7 +3398,22 @@
 
       // 翻译引擎变化
       const engineSelect = this.panel.querySelector('#translationEngine');
-      engineSelect.addEventListener('change', () => {
+      engineSelect.addEventListener('change', async (e) => {
+        const previousEngine = this.currentEngine || this.config?.global?.engine;
+        const newEngine = e.target.value;
+        
+        // 在切换前，保存当前引擎的配置（如果有输入）
+        if (previousEngine && previousEngine !== 'google') {
+          await this.saveCurrentEngineConfig(previousEngine);
+        }
+        
+        // 更新当前引擎
+        this.currentEngine = newEngine;
+        
+        // 加载新引擎的配置
+        await this.loadEngineConfig();
+        
+        // 更新界面显示
         this.updateAPIConfigVisibility();
         this.updateTranslationStyleVisibility();
       });
@@ -3505,6 +3521,55 @@
     }
 
     /**
+     * 保存当前引擎的配置（在切换引擎前调用）
+     */
+    async saveCurrentEngineConfig(engineName) {
+      try {
+        // 只保存 AI 引擎的配置
+        if (!['custom', 'gpt4', 'gemini', 'deepseek'].includes(engineName)) {
+          return;
+        }
+        
+        const apiKey = this.panel.querySelector('#apiKey')?.value;
+        
+        // 如果没有输入 API 密钥，不保存
+        if (!apiKey || !apiKey.trim()) {
+          return;
+        }
+        
+        const apiEndpoint = this.panel.querySelector('#apiEndpoint')?.value;
+        const apiModel = this.panel.querySelector('#apiModel')?.value;
+        
+        const engineConfig = {
+          enabled: true,
+          apiKey: apiKey.trim()
+        };
+        
+        // 根据引擎类型设置默认值
+        if (engineName === 'custom') {
+          engineConfig.endpoint = apiEndpoint?.trim() || '';
+          engineConfig.model = apiModel?.trim() || 'gpt-4';
+          engineConfig.name = 'Custom API';
+        } else if (engineName === 'gpt4') {
+          engineConfig.endpoint = 'https://api.openai.com/v1/chat/completions';
+          engineConfig.model = apiModel?.trim() || 'gpt-4';
+        } else if (engineName === 'gemini') {
+          engineConfig.endpoint = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
+          engineConfig.model = apiModel?.trim() || 'gemini-pro';
+        } else if (engineName === 'deepseek') {
+          engineConfig.endpoint = 'https://api.deepseek.com/v1/chat/completions';
+          engineConfig.model = apiModel?.trim() || 'deepseek-chat';
+        }
+        
+        // 保存配置
+        await window.translationAPI.saveEngineConfig(engineName, engineConfig);
+        console.log(`[Settings] Auto-saved config for ${engineName} before switching`);
+      } catch (error) {
+        console.error('[Settings] Failed to auto-save engine config:', error);
+      }
+    }
+
+    /**
      * 加载引擎配置
      */
     async loadEngineConfig() {
@@ -3553,6 +3618,9 @@
       this.panel.querySelector('#groupTranslation').checked = this.config.global.groupTranslation;
       this.panel.querySelector('#translationEngine').value = this.config.global.engine;
       this.panel.querySelector('#targetLanguage').value = this.config.global.targetLang;
+      
+      // 初始化当前引擎
+      this.currentEngine = this.config.global.engine;
 
       // 输入框设置
       this.panel.querySelector('#inputBoxEnabled').checked = this.config.inputBox.enabled;
