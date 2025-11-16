@@ -124,14 +124,15 @@
       return {
         global: {
           autoTranslate: false,
-          engine: 'google',
+          engine: 'google', // 聊天窗口翻译引擎（接收消息）
           sourceLang: 'auto',
           targetLang: 'zh-CN',
           groupTranslation: false
         },
         inputBox: {
           enabled: false,
-          style: '通用',
+          engine: 'google', // 输入框翻译引擎（发送消息）
+          style: '通用', // 翻译风格（仅用于输入框翻译）
           targetLang: 'auto'
         },
         advanced: {
@@ -285,7 +286,7 @@
 
         const messageText = textElement.textContent.trim();
         
-        // 聊天窗口翻译始终使用全局配置的目标语言（通常是中文）
+        // 聊天窗口翻译使用全局配置的目标语言（通常是中文）
         // 不受好友独立配置影响
         const targetLang = this.config.global.targetLang || 'zh-CN';
         
@@ -296,7 +297,7 @@
           return;
         }
 
-        // 翻译消息
+        // 翻译消息（聊天窗口翻译，不使用风格）
         await this.translateMessage(messageNode, messageText);
 
       } catch (error) {
@@ -391,7 +392,8 @@
     },
 
     /**
-     * 翻译消息
+     * 翻译消息（聊天窗口接收的消息）
+     * 注意：聊天窗口翻译不使用风格参数，只做正常翻译
      */
     async translateMessage(messageNode, text) {
       try {
@@ -400,19 +402,17 @@
           return;
         }
 
-        // 聊天窗口翻译使用全局配置，不受好友独立配置影响
+        // 聊天窗口翻译使用全局配置的引擎（可以是谷歌或AI）
         // 接收到的消息应该翻译成用户设置的目标语言（通常是中文）
         const engineName = this.config.global.engine;
-        console.log(`[Translation] 🔄 使用翻译引擎: ${engineName}, 风格: ${this.config.inputBox.style}`);
+        console.log(`[Translation] 🔄 聊天窗口翻译，使用引擎: ${engineName}（不使用风格）`);
         
         const response = await window.translationAPI.translate({
           text: text,
           sourceLang: this.config.global.sourceLang || 'auto',
           targetLang: this.config.global.targetLang || 'zh-CN',
           engineName: engineName,
-          options: {
-            style: this.config.inputBox.style || '通用'
-          }
+          options: {} // 聊天窗口翻译不传递风格参数
         });
 
         if (response.success) {
@@ -1481,15 +1481,19 @@
         }
         
         console.log('[Translation] Final target language:', targetLang);
-        console.log('[Translation] 🎨 Input box style:', this.config.inputBox.style);
+        
+        // 输入框翻译使用独立的引擎配置和风格参数
+        const inputBoxEngine = this.config.inputBox.engine || this.config.global.engine;
+        const inputBoxStyle = this.config.inputBox.style || '通用';
+        console.log(`[Translation] 🎨 输入框翻译，使用引擎: ${inputBoxEngine}, 风格: ${inputBoxStyle}`);
         
         const response = await window.translationAPI.translate({
           text: text,
           sourceLang: 'auto',
           targetLang: targetLang,
-          engineName: this.config.global.engine,
+          engineName: inputBoxEngine,
           options: {
-            style: this.config.inputBox.style
+            style: inputBoxStyle // 输入框翻译使用风格参数
           }
         });
 
@@ -1585,13 +1589,14 @@
           console.warn('[Translation] Language detection failed, using default zh-CN:', error);
         }
         
-        // 执行反向翻译 - 翻译回原始语言
+        // 执行反向翻译 - 翻译回原始语言（使用输入框引擎）
+        const inputBoxEngine = this.config.inputBox.engine || this.config.global.engine;
         const response = await window.translationAPI.translate({
           text: translatedText,
           sourceLang: targetLang,
           targetLang: sourceLang, // 翻译回原始语言
-          engineName: this.config.global.engine,
-          options: {}
+          engineName: inputBoxEngine,
+          options: {} // 反向翻译不使用风格
         });
         
         if (response.success) {
@@ -1837,13 +1842,17 @@
             
             console.log('[Translation] Realtime target language:', targetLang);
             
+            // 实时翻译也使用输入框的引擎和风格配置
+            const inputBoxEngine = this.config.inputBox.engine || this.config.global.engine;
+            const inputBoxStyle = this.config.inputBox.style || '通用';
+            
             const response = await window.translationAPI.translate({
               text: text,
               sourceLang: 'auto',
               targetLang: targetLang,
-              engineName: this.config.global.engine,
+              engineName: inputBoxEngine,
               options: {
-                style: this.config.inputBox.style
+                style: inputBoxStyle // 实时翻译使用风格参数
               }
             });
             
@@ -3043,6 +3052,20 @@
             <div class="settings-section">
               <h3>📝 基础设置</h3>
               
+              <div class="setting-item" style="background: #e3f2fd; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: start; gap: 8px;">
+                  <span style="font-size: 20px;">💡</span>
+                  <div>
+                    <strong style="color: #1976d2;">成本优化建议</strong>
+                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #424242; line-height: 1.5;">
+                      • <strong>聊天窗口翻译</strong>（接收消息）：推荐使用谷歌翻译（免费），用于理解对方在说什么<br>
+                      • <strong>输入框翻译</strong>（发送消息）：可选 AI 翻译 + 风格，用于以合适的语气回复对方<br>
+                      • 这样配置可降低 <strong>70-90%</strong> 的翻译成本！
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
               <div class="setting-item">
                 <label class="setting-label">
                   <input type="checkbox" id="autoTranslate" class="setting-checkbox">
@@ -3060,15 +3083,15 @@
               </div>
               
               <div class="setting-item">
-                <label class="setting-title">翻译引擎</label>
+                <label class="setting-title">聊天窗口翻译引擎（接收消息）</label>
                 <select id="translationEngine" class="setting-select">
-                  <option value="google">Google 翻译（免费）</option>
+                  <option value="google">Google 翻译（免费，推荐）</option>
                   <option value="gpt4">GPT-4</option>
                   <option value="gemini">Google Gemini</option>
                   <option value="deepseek">DeepSeek</option>
                   <option value="custom">自定义 API</option>
                 </select>
-                <p class="setting-desc">选择翻译服务提供商</p>
+                <p class="setting-desc">💡 用于翻译对方发来的消息，推荐使用谷歌翻译（免费）节省成本</p>
               </div>
               
               <div class="setting-item">
@@ -3140,6 +3163,18 @@
               </div>
               
               <div class="setting-item">
+                <label class="setting-title">输入框翻译引擎（发送消息）</label>
+                <select id="inputBoxEngine" class="setting-select">
+                  <option value="google">Google 翻译（免费）</option>
+                  <option value="gpt4">GPT-4（支持风格）</option>
+                  <option value="gemini">Google Gemini（支持风格）</option>
+                  <option value="deepseek">DeepSeek（支持风格）</option>
+                  <option value="custom">自定义 API（支持风格）</option>
+                </select>
+                <p class="setting-desc">💡 用于翻译你要发送的消息，AI 引擎支持风格定制（如正式、口语化等）</p>
+              </div>
+              
+              <div class="setting-item">
                 <label class="setting-title">输入框翻译目标语言</label>
                 <select id="inputBoxTargetLang" class="setting-select">
                   <option value="auto">🤖 自动检测（根据对方语言）</option>
@@ -3196,21 +3231,21 @@
               </div>
               
               <div class="setting-item">
-                <label class="setting-title">翻译风格（仅 AI 引擎）</label>
+                <label class="setting-title">翻译风格（仅输入框 AI 引擎）</label>
                 <select id="translationStyle" class="setting-select">
-                  <option value="通用">通用</option>
-                  <option value="正式">正式</option>
-                  <option value="口语化">口语化</option>
-                  <option value="亲切">亲切</option>
-                  <option value="幽默">幽默</option>
-                  <option value="礼貌">礼貌</option>
-                  <option value="强硬">强硬</option>
-                  <option value="简洁">简洁</option>
-                  <option value="激励">激励</option>
-                  <option value="中立">中立</option>
-                  <option value="专业">专业</option>
+                  <option value="通用">通用 - 自然流畅的表达</option>
+                  <option value="正式">正式 - 商务沟通、正式场合</option>
+                  <option value="口语化">口语化 - 朋友聊天、轻松场合</option>
+                  <option value="亲切">亲切 - 客户服务、关怀问候</option>
+                  <option value="幽默">幽默 - 风趣俏皮、营销推广</option>
+                  <option value="礼貌">礼貌 - 初次接触、正式请求</option>
+                  <option value="强硬">强硬 - 谈判维权、坚定表达</option>
+                  <option value="简洁">简洁 - 快速沟通、精炼直接</option>
+                  <option value="激励">激励 - 团队激励、销售推广</option>
+                  <option value="中立">中立 - 客观陈述、不带情绪</option>
+                  <option value="专业">专业 - 技术讨论、专业领域</option>
                 </select>
-                <p class="setting-desc">AI 翻译时使用的语气风格</p>
+                <p class="setting-desc">⚠️ 风格仅在输入框翻译时生效，且需要使用 AI 引擎（GPT-4、Gemini、DeepSeek）</p>
               </div>
             </div>
             
@@ -3624,6 +3659,7 @@
 
       // 输入框设置
       this.panel.querySelector('#inputBoxEnabled').checked = this.config.inputBox.enabled;
+      this.panel.querySelector('#inputBoxEngine').value = this.config.inputBox.engine || this.config.global.engine;
       this.panel.querySelector('#inputBoxTargetLang').value = this.config.inputBox.targetLang || 'auto';
       this.panel.querySelector('#translationStyle').value = this.config.inputBox.style;
 
@@ -3753,6 +3789,7 @@
           },
           inputBox: {
             enabled: this.panel.querySelector('#inputBoxEnabled').checked,
+            engine: this.panel.querySelector('#inputBoxEngine').value,
             targetLang: this.panel.querySelector('#inputBoxTargetLang').value,
             style: this.panel.querySelector('#translationStyle').value
           },

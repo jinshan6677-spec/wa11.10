@@ -58,14 +58,16 @@ class ConfigManager {
     return {
       global: {
         autoTranslate: false,
-        engine: 'google',
+        engine: 'google', // 聊天窗口翻译引擎（接收消息）
         sourceLang: 'auto',
         targetLang: 'zh-CN',
         groupTranslation: false
       },
       inputBox: {
         enabled: false,
-        style: '通用'
+        engine: 'google', // 输入框翻译引擎（发送消息）
+        style: '通用', // 翻译风格（仅用于输入框翻译）
+        targetLang: 'auto'
       },
       advanced: {
         friendIndependent: false,
