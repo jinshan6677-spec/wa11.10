@@ -3431,7 +3431,7 @@
       const overlay = this.panel.querySelector('.settings-overlay');
       overlay.onclick = () => this.hide();
 
-      // 翻译引擎变化
+      // 聊天窗口翻译引擎变化
       const engineSelect = this.panel.querySelector('#translationEngine');
       engineSelect.addEventListener('change', async (e) => {
         const previousEngine = this.currentEngine || this.config?.global?.engine;
@@ -3448,6 +3448,14 @@
         // 加载新引擎的配置
         await this.loadEngineConfig();
         
+        // 更新界面显示
+        this.updateAPIConfigVisibility();
+        this.updateTranslationStyleVisibility();
+      });
+
+      // 输入框翻译引擎变化
+      const inputBoxEngineSelect = this.panel.querySelector('#inputBoxEngine');
+      inputBoxEngineSelect.addEventListener('change', () => {
         // 更新界面显示
         this.updateAPIConfigVisibility();
         this.updateTranslationStyleVisibility();
@@ -3684,11 +3692,12 @@
      * 更新翻译风格显示（仅 AI 引擎可用）
      */
     updateTranslationStyleVisibility() {
-      const engine = this.panel.querySelector('#translationEngine').value;
+      // 翻译风格只用于输入框翻译，所以应该检查输入框引擎
+      const inputBoxEngine = this.panel.querySelector('#inputBoxEngine').value;
       const styleItem = this.panel.querySelector('#translationStyle').closest('.setting-item');
       
-      // 只有 AI 引擎才显示翻译风格选项
-      if (engine === 'google') {
+      // 只有输入框使用 AI 引擎时才显示翻译风格选项
+      if (inputBoxEngine === 'google') {
         styleItem.style.display = 'none';
       } else {
         styleItem.style.display = 'block';
@@ -3699,23 +3708,28 @@
      * 更新 API 配置显示
      */
     updateAPIConfigVisibility() {
-      const engine = this.panel.querySelector('#translationEngine').value;
+      const chatEngine = this.panel.querySelector('#translationEngine').value;
+      const inputBoxEngine = this.panel.querySelector('#inputBoxEngine').value;
       const apiSection = this.panel.querySelector('#apiConfigSection');
       const customEndpoint = this.panel.querySelector('#customEndpointItem');
       const customModel = this.panel.querySelector('#customModelItem');
 
-      if (engine === 'google') {
-        apiSection.style.display = 'none';
-      } else {
+      // 只要聊天窗口或输入框有一个使用 AI 引擎，就显示 API 配置
+      const needsAPI = chatEngine !== 'google' || inputBoxEngine !== 'google';
+      
+      if (needsAPI) {
         apiSection.style.display = 'block';
         
-        if (engine === 'custom') {
+        // 如果任一引擎使用 custom，显示自定义端点和模型配置
+        if (chatEngine === 'custom' || inputBoxEngine === 'custom') {
           customEndpoint.style.display = 'block';
           customModel.style.display = 'block';
         } else {
           customEndpoint.style.display = 'none';
           customModel.style.display = 'none';
         }
+      } else {
+        apiSection.style.display = 'none';
       }
     }
 
