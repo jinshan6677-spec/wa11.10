@@ -112,6 +112,22 @@ class ConfigManager {
   }
 
   /**
+   * 获取单个引擎配置
+   * @param {string} engineName - 引擎名称
+   * @returns {Object} 引擎配置
+   */
+  getEngineConfig(engineName) {
+    const config = this.store.get(`engines.${engineName}`) || {};
+    
+    // 解密 API 密钥
+    if (config.apiKey) {
+      config.apiKey = this.secureStorage.decryptApiKey(config.apiKey);
+    }
+    
+    return config;
+  }
+
+  /**
    * 获取所有引擎配置
    * @returns {Object} 所有引擎配置
    */

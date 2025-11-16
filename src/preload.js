@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('translationAPI', {
   },
 
   /**
-   * 获取配置
+   * 获取配置 - 通过 IPC
    * @param {string} accountId - 账号ID
    * @returns {Promise<Object>} 配置对象
    */
@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('translationAPI', {
   },
 
   /**
-   * 保存配置
+   * 保存配置 - 通过 IPC
    * @param {string} accountId - 账号ID
    * @param {Object} config - 配置对象
    * @returns {Promise<Object>} 保存结果
@@ -58,6 +58,25 @@ contextBridge.exposeInMainWorld('translationAPI', {
    */
   clearCache: () => {
     return ipcRenderer.invoke('translation:clearCache');
+  },
+
+  /**
+   * 保存引擎配置
+   * @param {string} engineName - 引擎名称
+   * @param {Object} config - 引擎配置
+   * @returns {Promise<Object>} 保存结果
+   */
+  saveEngineConfig: (engineName, config) => {
+    return ipcRenderer.invoke('translation:saveEngineConfig', engineName, config);
+  },
+
+  /**
+   * 获取引擎配置
+   * @param {string} engineName - 引擎名称
+   * @returns {Promise<Object>} 引擎配置
+   */
+  getEngineConfig: (engineName) => {
+    return ipcRenderer.invoke('translation:getEngineConfig', engineName);
   }
 });
 

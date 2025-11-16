@@ -113,6 +113,11 @@ class GoogleTranslateAdapter extends TranslationAdapter {
               }
             }
 
+            // 解码 HTML 实体
+            console.log('[GoogleTranslate] Raw API response:', translatedText);
+            translatedText = this.decodeHTMLEntities(translatedText);
+            console.log('[GoogleTranslate] After decode:', translatedText);
+
             const detectedSourceLanguage = parsed[2] || source;
 
             resolve({
@@ -152,6 +157,42 @@ class GoogleTranslateAdapter extends TranslationAdapter {
       console.warn('Language detection failed, using fallback:', error.message);
       return super.detectLanguage(text);
     }
+  }
+
+  /**
+   * 解码 HTML 实体
+   * @param {string} text - 包含 HTML 实体的文本
+   * @returns {string} 解码后的文本
+   */
+  decodeHTMLEntities(text) {
+    if (!text) return text;
+    
+    // 使用浏览器的 DOMParser 或 textarea 方法解码
+    // 但在 Node.js 环境中，我们需要手动解码
+    let decoded = text;
+    
+    // 多次解码以处理双重编码的情况（如 &amp;#x27; -> &#x27; -> '）
+    let prevDecoded;
+    let iterations = 0;
+    const maxIterations = 3; // 防止无限循环
+    
+    do {
+      prevDecoded = decoded;
+      decoded = decoded
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#x27;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&#x2F;/g, '/')
+        .replace(/&#47;/g, '/')
+        .replace(/&apos;/g, "'");
+      
+      iterations++;
+    } while (decoded !== prevDecoded && iterations < maxIterations);
+    
+    return decoded;
   }
 
   /**

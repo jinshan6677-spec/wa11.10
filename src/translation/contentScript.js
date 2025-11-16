@@ -101,8 +101,8 @@
       try {
         if (window.translationAPI) {
           const response = await window.translationAPI.getConfig(this.accountId);
-          if (response.success) {
-            this.config = response.data;
+          if (response.success && (response.config || response.data)) {
+            this.config = response.config || response.data;
           } else {
             console.error('[Translation] Failed to load config:', response.error);
             this.config = this.getDefaultConfig();
@@ -402,15 +402,21 @@
 
         // 聊天窗口翻译使用全局配置，不受好友独立配置影响
         // 接收到的消息应该翻译成用户设置的目标语言（通常是中文）
+        const engineName = this.config.global.engine;
+        console.log(`[Translation] 🔄 使用翻译引擎: ${engineName}, 风格: ${this.config.inputBox.style}`);
+        
         const response = await window.translationAPI.translate({
           text: text,
           sourceLang: this.config.global.sourceLang || 'auto',
           targetLang: this.config.global.targetLang || 'zh-CN',
-          engineName: this.config.global.engine,
-          options: {}
+          engineName: engineName,
+          options: {
+            style: this.config.inputBox.style || '通用'
+          }
         });
 
         if (response.success) {
+          console.log(`[Translation] ✅ 翻译成功，使用引擎: ${response.data.engineName || engineName}`);
           this.displayTranslation(messageNode, response.data);
         } else {
           console.error('[Translation] Translation failed:', response.error);
@@ -440,14 +446,35 @@
       
       const detectedLang = result.detectedLang || 'auto';
       const targetLang = this.config.global.targetLang;
+      const engineName = result.engineName || this.config.global.engine;
+      
+      // 引擎图标映射
+      const engineIcons = {
+        'google': '🌐',
+        'gpt4': '🤖',
+        'gemini': '✨',
+        'deepseek': '🧠',
+        'custom': '⚙️'
+      };
+      const engineIcon = engineIcons[engineName] || '🌐';
       
       // 优化：简化 HTML 结构，从 4-5 个节点减少到 2-3 个
       translationDiv.innerHTML = `
         <div class="translation-header">
-          🌐 ${detectedLang} → ${targetLang}${result.cached ? ' 📦' : ''}
+          ${engineIcon} ${detectedLang} → ${targetLang}${result.cached ? ' 📦' : ''} [${engineName}]
         </div>
-        <div class="translation-text">${this.escapeHtml(result.translatedText)}</div>
+        <div class="translation-text"></div>
       `;
+      
+      // 使用 textContent 设置文本，避免 HTML 实体编码问题
+      const textDiv = translationDiv.querySelector('.translation-text');
+      
+      // 在浏览器端解码 HTML 实体
+      const decodedText = this.decodeHTMLEntitiesInBrowser(result.translatedText);
+      console.log('[ContentScript] Original text:', result.translatedText);
+      console.log('[ContentScript] Decoded text:', decodedText);
+      
+      textDiv.textContent = decodedText;
 
       // 找到消息内容容器
       const messageContent = messageNode.querySelector('.copyable-text') ||
@@ -485,6 +512,28 @@
       if (messageContent.parentNode) {
         messageContent.parentNode.appendChild(errorDiv);
       }
+    },
+
+    /**
+     * 在浏览器端解码 HTML 实体
+     */
+    decodeHTMLEntitiesInBrowser(text) {
+      if (!text) return text;
+      
+      const textarea = document.createElement('textarea');
+      let decoded = text;
+      let prevDecoded;
+      let iterations = 0;
+      
+      // 多次解码以处理双重编码
+      do {
+        prevDecoded = decoded;
+        textarea.innerHTML = decoded;
+        decoded = textarea.value;
+        iterations++;
+      } while (decoded !== prevDecoded && iterations < 3);
+      
+      return decoded;
     },
 
     /**
@@ -1054,15 +1103,12 @@
       const checkAndBlock = (e, source) => {
         const inputBox = getInputBox();
         if (!inputBox) {
-          console.log(`[Translation] ${source}: No input box found`);
           return false;
         }
         
         const text = getInputText(inputBox);
-        console.log(`[Translation] ${source}: Checking text:`, text);
         
         if (this.containsChinese(text)) {
-          console.log(`[Translation] ${source}: Chinese detected! Blocking...`);
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
@@ -1074,7 +1120,6 @@
           return true;
         }
         
-        console.log(`[Translation] ${source}: No Chinese detected, allowing`);
         return false;
       };
       
@@ -1119,7 +1164,6 @@
       };
       
       // 第5层：持续监控输入框，如果检测到中文则禁用发送按钮
-      let lastLogTime = 0;
       this.chineseBlockInputMonitor = setInterval(() => {
         if (!this.shouldBlockChinese()) return;
         
@@ -1128,13 +1172,6 @@
         
         const text = getInputText(inputBox);
         const hasChinese = this.containsChinese(text);
-        
-        // 每秒最多打印一次日志，避免刷屏
-        const now = Date.now();
-        if (text && now - lastLogTime > 1000) {
-          console.log('[Translation] Monitor: text=', text, 'hasChinese=', hasChinese);
-          lastLogTime = now;
-        }
         
         // 查找发送按钮
         const sendButton = document.querySelector('[data-testid="send"]') ||
@@ -1148,17 +1185,12 @@
             sendButton.style.pointerEvents = 'none';
             sendButton.style.opacity = '0.5';
             sendButton.setAttribute('data-chinese-blocked', 'true');
-            
-            if (now - lastLogTime > 1000) {
-              console.log('[Translation] Monitor: Send button DISABLED');
-            }
           } else {
             // 恢复发送按钮
             if (sendButton.getAttribute('data-chinese-blocked') === 'true') {
               sendButton.style.pointerEvents = '';
               sendButton.style.opacity = '';
               sendButton.removeAttribute('data-chinese-blocked');
-              console.log('[Translation] Monitor: Send button ENABLED');
             }
           }
         }
@@ -1449,6 +1481,7 @@
         }
         
         console.log('[Translation] Final target language:', targetLang);
+        console.log('[Translation] 🎨 Input box style:', this.config.inputBox.style);
         
         const response = await window.translationAPI.translate({
           text: text,
@@ -1461,7 +1494,9 @@
         });
 
         if (response.success) {
-          const translatedText = response.data.translatedText;
+          // 解码 HTML 实体
+          const translatedText = this.decodeHTMLEntitiesInBrowser(response.data.translatedText);
+          
           console.log('[Translation] Translation successful:', translatedText);
           
           // 将翻译后的文本设置到输入框
@@ -1583,14 +1618,20 @@
           content.innerHTML = `
             <div class="reverse-item">
               <div class="reverse-label">实时翻译</div>
-              <div class="reverse-text">${this.escapeHtml(translatedText)}</div>
+              <div class="reverse-text" data-type="translated"></div>
             </div>
             <div class="reverse-item">
               <div class="reverse-label">反向结果</div>
-              <div class="reverse-text">${this.escapeHtml(reverseText)}</div>
+              <div class="reverse-text" data-type="reverse"></div>
             </div>
             ${needsWarning ? '<div class="reverse-warning">⚠️ 相似度较低，翻译可能不够准确</div>' : ''}
           `;
+          
+          // 在浏览器端解码 HTML 实体并使用 textContent 设置
+          const decodedTranslated = this.decodeHTMLEntitiesInBrowser(translatedText);
+          const decodedReverse = this.decodeHTMLEntitiesInBrowser(reverseText);
+          content.querySelector('[data-type="translated"]').textContent = decodedTranslated;
+          content.querySelector('[data-type="reverse"]').textContent = decodedReverse;
           
           // 重新绑定关闭按钮
           const newCloseBtn = reverseDiv.querySelector('.reverse-close');
@@ -1910,7 +1951,9 @@
         } else if (isError) {
           textElement.innerHTML = '<span style="color: #ef4444;">' + this.escapeHtml(text) + '</span>';
         } else {
-          textElement.textContent = text;
+          // 解码 HTML 实体后再设置文本
+          const decodedText = this.decodeHTMLEntitiesInBrowser(text);
+          textElement.textContent = decodedText;
         }
       }
       
@@ -2970,6 +3013,7 @@
       this.panel = null;
       this.config = null;
       this.isVisible = false;
+      this.accountId = null;
     }
 
     /**
@@ -3355,6 +3399,7 @@
       const engineSelect = this.panel.querySelector('#translationEngine');
       engineSelect.addEventListener('change', () => {
         this.updateAPIConfigVisibility();
+        this.updateTranslationStyleVisibility();
       });
 
       // 测试 API 按钮
@@ -3408,6 +3453,11 @@
         this.createPanel();
       }
 
+      // 设置 accountId
+      this.accountId = window.WhatsAppTranslation.accountId;
+      
+      // translationAPI 由 preload 脚本提供
+
       // 加载当前配置
       await this.loadSettings();
       
@@ -3440,13 +3490,55 @@
      */
     async loadSettings() {
       try {
-        const response = await window.translationAPI.getConfig('default');
-        if (response.success) {
-          this.config = response.data;
+        const accountId = this.accountId || window.WhatsAppTranslation.accountId;
+        const response = await window.translationAPI.getConfig(accountId);
+        if (response.success && (response.config || response.data)) {
+          this.config = response.config || response.data;
           this.updateUI();
+          
+          // 加载引擎配置
+          await this.loadEngineConfig();
         }
       } catch (error) {
         console.error('[Settings] Failed to load settings:', error);
+      }
+    }
+
+    /**
+     * 加载引擎配置
+     */
+    async loadEngineConfig() {
+      try {
+        const selectedEngine = this.config.global.engine;
+        
+        // 只为 AI 引擎加载配置
+        if (!['custom', 'gpt4', 'gemini', 'deepseek'].includes(selectedEngine)) {
+          return;
+        }
+        
+        const engineConfigResponse = await window.translationAPI.getEngineConfig(selectedEngine);
+        
+        if (engineConfigResponse.success && engineConfigResponse.data) {
+          const engineConfig = engineConfigResponse.data;
+          
+          // 填充输入框
+          if (engineConfig.apiKey) {
+            this.panel.querySelector('#apiKey').value = engineConfig.apiKey;
+          }
+          
+          if (selectedEngine === 'custom') {
+            if (engineConfig.endpoint) {
+              this.panel.querySelector('#apiEndpoint').value = engineConfig.endpoint;
+            }
+            if (engineConfig.model) {
+              this.panel.querySelector('#apiModel').value = engineConfig.model;
+            }
+          }
+          
+          console.log('[Settings] Loaded engine config for:', selectedEngine);
+        }
+      } catch (error) {
+        console.error('[Settings] Failed to load engine config:', error);
       }
     }
 
@@ -3476,9 +3568,27 @@
       // 更新好友配置显示
       this.updateFriendConfigVisibility();
       this.loadCurrentFriendConfig();
+      
+      // 更新翻译风格显示（仅 AI 引擎可用）
+      this.updateTranslationStyleVisibility();
 
       // 加载统计信息
       this.loadStats();
+    }
+
+    /**
+     * 更新翻译风格显示（仅 AI 引擎可用）
+     */
+    updateTranslationStyleVisibility() {
+      const engine = this.panel.querySelector('#translationEngine').value;
+      const styleItem = this.panel.querySelector('#translationStyle').closest('.setting-item');
+      
+      // 只有 AI 引擎才显示翻译风格选项
+      if (engine === 'google') {
+        styleItem.style.display = 'none';
+      } else {
+        styleItem.style.display = 'block';
+      }
     }
 
     /**
@@ -3541,6 +3651,26 @@
      */
     async saveSettings() {
       try {
+        console.log('[Settings] Starting save process...');
+        console.log('[Settings] window.translationAPI:', window.translationAPI);
+        console.log('[Settings] this.accountId:', this.accountId);
+        console.log('[Settings] window.WhatsAppTranslation.accountId:', window.WhatsAppTranslation?.accountId);
+        
+        // 检查 translationAPI 是否可用
+        if (!window.translationAPI) {
+          throw new Error('translationAPI 未初始化，请刷新页面后重试');
+        }
+        
+        // 确保配置已初始化
+        if (!this.config) {
+          this.config = {
+            global: {},
+            inputBox: {},
+            advanced: {},
+            friendConfigs: {}
+          };
+        }
+        
         // 保存当前联系人配置
         this.saveCurrentFriendConfig();
         
@@ -3569,8 +3699,64 @@
           friendConfigs: this.config.friendConfigs || {}
         };
 
-        // 保存配置
-        const response = await window.translationAPI.saveConfig('default', newConfig);
+        console.log('[Settings] New config:', newConfig);
+        
+        // 获取 accountId
+        const accountId = this.accountId || window.WhatsAppTranslation.accountId;
+        if (!accountId) {
+          throw new Error('无法获取账号 ID');
+        }
+        
+        console.log('[Settings] Saving config for account:', accountId);
+        
+        // 保存引擎配置（如果有 API 配置）
+        const selectedEngine = newConfig.global.engine;
+        const apiKey = this.panel.querySelector('#apiKey')?.value;
+        const apiEndpoint = this.panel.querySelector('#apiEndpoint')?.value;
+        const apiModel = this.panel.querySelector('#apiModel')?.value;
+        
+        console.log('[Settings] Engine config inputs:', {
+          selectedEngine,
+          apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : '(empty)',
+          apiEndpoint,
+          apiModel
+        });
+        
+        console.log('[Settings] Checking if should save engine config...');
+        console.log('[Settings] apiKey exists:', !!apiKey);
+        console.log('[Settings] selectedEngine:', selectedEngine);
+        console.log('[Settings] Is AI engine:', ['custom', 'gpt4', 'gemini', 'deepseek'].includes(selectedEngine));
+        
+        if (apiKey && (selectedEngine === 'custom' || selectedEngine === 'gpt4' || selectedEngine === 'gemini' || selectedEngine === 'deepseek')) {
+          console.log('[Settings] Saving engine config for:', selectedEngine);
+          const engineConfig = {
+            enabled: true,
+            apiKey: apiKey
+          };
+          
+          if (selectedEngine === 'custom') {
+            engineConfig.endpoint = apiEndpoint || '';
+            engineConfig.model = apiModel || 'gpt-4';
+            engineConfig.name = 'Custom API';
+          } else if (selectedEngine === 'gpt4') {
+            engineConfig.endpoint = 'https://api.openai.com/v1/chat/completions';
+            engineConfig.model = apiModel || 'gpt-4';
+          } else if (selectedEngine === 'gemini') {
+            engineConfig.endpoint = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
+            engineConfig.model = apiModel || 'gemini-pro';
+          } else if (selectedEngine === 'deepseek') {
+            engineConfig.endpoint = 'https://api.deepseek.com/v1/chat/completions';
+            engineConfig.model = apiModel || 'deepseek-chat';
+          }
+          
+          // 保存引擎配置
+          await window.translationAPI.saveEngineConfig(selectedEngine, engineConfig);
+        }
+        
+        // 保存账号配置
+        const response = await window.translationAPI.saveConfig(accountId, newConfig);
+        
+        console.log('[Settings] Save response:', response);
         
         if (response.success) {
           // 更新本地配置
@@ -3761,6 +3947,16 @@
       
       if (!contactId) {
         return;
+      }
+      
+      // 确保 config 已初始化
+      if (!this.config) {
+        this.config = {
+          global: {},
+          inputBox: {},
+          advanced: {},
+          friendConfigs: {}
+        };
       }
       
       if (!this.config.friendConfigs) {

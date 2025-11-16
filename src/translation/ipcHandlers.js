@@ -9,7 +9,17 @@ const translationService = require('./translationService');
 /**
  * 注册所有 IPC 处理器
  */
-function registerIPCHandlers() {
+async function registerIPCHandlers() {
+  // 初始化翻译服务
+  if (!translationService.initialized) {
+    try {
+      await translationService.initialize();
+      console.log('[IPC] Translation service initialized');
+    } catch (error) {
+      console.error('[IPC] Failed to initialize translation service:', error);
+    }
+  }
+  
   // 翻译请求
   ipcMain.handle('translation:translate', async (event, request) => {
     try {
@@ -112,6 +122,46 @@ function registerIPCHandlers() {
       };
     } catch (error) {
       console.error('[IPC] Clear cache error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 保存引擎配置
+  ipcMain.handle('translation:saveEngineConfig', async (event, engineName, config) => {
+    try {
+      translationService.configManager.saveEngineConfig(engineName, config);
+      console.log(`[IPC] Saved engine config for: ${engineName}`);
+      
+      // 强制重新注册引擎
+      translationService.registerEngines();
+      console.log('[IPC] Engines reregistered with new config');
+      console.log('[IPC] Available engines:', Array.from(translationService.translationManager.engines.keys()));
+      
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('[IPC] Save engine config error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 获取引擎配置
+  ipcMain.handle('translation:getEngineConfig', async (event, engineName) => {
+    try {
+      const config = translationService.configManager.getEngineConfig(engineName);
+      return {
+        success: true,
+        data: config
+      };
+    } catch (error) {
+      console.error('[IPC] Get engine config error:', error);
       return {
         success: false,
         error: error.message

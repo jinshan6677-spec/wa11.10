@@ -23,6 +23,7 @@
     "test:reconnect": "node scripts/test-reconnect.js",
     "test:clean": "node scripts/clean-session.js",
     "test:build": "node scripts/test-build.js",
+    "migrate": "node scripts/migrate-to-multi-instance.js",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix"
   },
@@ -49,13 +50,14 @@
   "homepage": "https://github.com/your-org/whatsapp-desktop-translation#readme",
   "dependencies": {
     "electron-store": "^8.1.0",
-    "lru-cache": "^10.0.0"
+    "lru-cache": "^10.0.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "electron": "^39.1.1",
     "electron-builder": "^26.0.12",
-    "jest": "^29.7.0",
-    "eslint": "^8.56.0"
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0"
   },
   "build": {
     "appId": "com.whatsapp.desktop.translation",
@@ -80,18 +82,32 @@
       {
         "from": "docs",
         "to": "docs",
-        "filter": ["*.md"]
+        "filter": [
+          "*.md"
+        ]
+      },
+      {
+        "from": "profiles",
+        "to": "profiles",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "ia32"]
+          "arch": [
+            "x64",
+            "ia32"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "resources/icon.ico",
@@ -116,11 +132,17 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "resources/icon.icns",
@@ -151,15 +173,23 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "rpm",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "resources/icons",

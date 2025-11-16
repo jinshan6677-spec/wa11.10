@@ -139,8 +139,9 @@ const InputBoxTranslation = {
       });
 
       if (response.success) {
-        // 替换输入框内容
-        this.setInputBoxText(response.data.translatedText);
+        // 解码并替换输入框内容
+        const decodedText = this.decodeHTMLEntitiesInBrowser(response.data.translatedText);
+        this.setInputBoxText(decodedText);
       } else {
         alert('翻译失败: ' + response.error);
       }
@@ -261,8 +262,13 @@ const InputBoxTranslation = {
           <div class="translation-header">
             <span>🌐 实时翻译预览</span>
           </div>
-          <div class="translation-text">${this.escapeHtml(response.data.translatedText)}</div>
+          <div class="translation-text"></div>
         `;
+        
+        // 在浏览器端解码 HTML 实体并使用 textContent 设置
+        const textDiv = this.realtimePreview.querySelector('.translation-text');
+        const decodedText = this.decodeHTMLEntitiesInBrowser(response.data.translatedText);
+        textDiv.textContent = decodedText;
       } else {
         this.realtimePreview.style.display = 'none';
       }
@@ -304,6 +310,28 @@ const InputBoxTranslation = {
    */
   containsChinese(text) {
     return /[\u4e00-\u9fa5]/.test(text);
+  },
+
+  /**
+   * 在浏览器端解码 HTML 实体
+   */
+  decodeHTMLEntitiesInBrowser(text) {
+    if (!text) return text;
+    
+    const textarea = document.createElement('textarea');
+    let decoded = text;
+    let prevDecoded;
+    let iterations = 0;
+    
+    // 多次解码以处理双重编码
+    do {
+      prevDecoded = decoded;
+      textarea.innerHTML = decoded;
+      decoded = textarea.value;
+      iterations++;
+    } while (decoded !== prevDecoded && iterations < 3);
+    
+    return decoded;
   },
 
   /**

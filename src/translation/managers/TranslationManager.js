@@ -81,8 +81,9 @@ class TranslationManager extends EventEmitter {
     // 使用清理后的文本
     const cleanedText = cleanInput.text;
     
-    // 生成请求唯一标识（用于去重）
-    const requestKey = `${cleanedText}:${sourceLang}:${targetLang}:${engineName}:${JSON.stringify(options)}`;
+    // 生成请求唯一标识（用于去重）- 包含风格参数
+    const styleKey = options.style || 'default';
+    const requestKey = `${cleanedText}:${sourceLang}:${targetLang}:${engineName}:${styleKey}`;
     
     // 使用性能优化器执行请求（带队列和去重）
     return this.performanceOptimizer.executeRequest(requestKey, async () => {
@@ -102,8 +103,9 @@ class TranslationManager extends EventEmitter {
     // 尝试使用指定引擎和降级引擎
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // 检查缓存
-        const cacheKey = this.cacheManager.generateKey(cleanedText, sourceLang, targetLang, currentEngine);
+        // 检查缓存 - 包含风格参数
+        const styleKey = options.style || 'default';
+        const cacheKey = this.cacheManager.generateKey(cleanedText, sourceLang, targetLang, currentEngine) + `:${styleKey}`;
         const cached = await this.cacheManager.get(cacheKey);
         
         if (cached) {
