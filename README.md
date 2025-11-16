@@ -33,7 +33,6 @@
 
 - **Electron 39.1.1** - 桌面应用框架（Chromium 132.x + Node.js 20.x）
 - **翻译引擎** - 支持 Google 翻译、GPT-4、Gemini、DeepSeek 等
-- **Docker** - 容器化部署（可选）
 - **Node.js 18+** - 运行时环境（推荐 20.x）
 
 ## 快速开始
@@ -63,36 +62,6 @@ npm run dev
 4. 所有 WhatsApp 功能都可以正常使用
 5. 翻译功能会自动注入到页面中，可在设置中配置
 
-### 容器部署
-
-1. **构建镜像**
-```bash
-npm run docker:build
-# 或
-docker build -t whatsapp-desktop .
-```
-
-2. **启动容器**
-```bash
-npm run docker:run
-# 或
-docker-compose up -d
-```
-
-3. **查看日志**
-```bash
-npm run docker:logs
-# 或
-docker-compose logs -f
-```
-
-4. **停止容器**
-```bash
-npm run docker:stop
-# 或
-docker-compose down
-```
-
 ### 应用打包
 
 生成平台特定的安装包：
@@ -110,13 +79,9 @@ whatsapp-desktop-container/
 ├── src/
 │   ├── main.js              # Electron 主进程
 │   └── config.js            # 配置文件
-├── docker/
-│   ├── Dockerfile           # Docker 镜像定义
-│   └── docker-compose.yml   # Docker Compose 配置
 ├── resources/               # 应用资源（图标等）
 ├── package.json
 ├── .gitignore
-├── .dockerignore
 └── README.md
 ```
 
@@ -218,19 +183,11 @@ npm run test:clean
 sudo apt-get install -y chromium fonts-liberation libasound2 libatk-bridge2.0-0
 ```
 
-### 问题：容器中无法运行
-
-**解决方案**：确保 Docker 配置了足够的共享内存：
-```yaml
-shm_size: 2gb
-```
-
 ### 问题：会话频繁过期
 
 **解决方案**：
 1. 检查会话数据目录权限
-2. 确保 Docker volume 正确挂载
-3. 避免同时在多个设备上登录同一账号
+2. 避免同时在多个设备上登录同一账号
 
 更多问题排查请参考 [TESTING_GUIDE.md](TESTING_GUIDE.md) 中的常见问题部分。
 
@@ -269,7 +226,6 @@ whatsapp-desktop-translation/
 │       ├── ipcHandlers.js   # IPC 通信处理器
 │       └── contentScript.js # 内容脚本
 ├── scripts/                 # 测试和工具脚本
-├── docker/                  # Docker 配置
 ├── resources/               # 应用资源
 ├── .kiro/specs/            # 项目规范文档
 ├── docs/                    # 文档目录

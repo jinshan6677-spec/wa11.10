@@ -41,12 +41,6 @@ if [ $? -eq 0 ]; then
     echo "  npm run dev        - 开发模式（带调试）"
     echo "  npm run build      - 打包应用"
     echo ""
-    echo "Docker 命令:"
-    echo "  npm run docker:build  - 构建镜像"
-    echo "  npm run docker:run    - 启动容器"
-    echo "  npm run docker:logs   - 查看日志"
-    echo "  npm run docker:stop   - 停止容器"
-    echo ""
 else
     echo ""
     echo "❌ 安装失败"

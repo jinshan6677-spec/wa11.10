@@ -24,11 +24,7 @@
     "test:clean": "node scripts/clean-session.js",
     "test:build": "node scripts/test-build.js",
     "lint": "eslint src/**/*.js",
-    "lint:fix": "eslint src/**/*.js --fix",
-    "docker:build": "docker build -t whatsapp-desktop .",
-    "docker:run": "docker-compose up -d",
-    "docker:logs": "docker-compose logs -f",
-    "docker:stop": "docker-compose down"
+    "lint:fix": "eslint src/**/*.js --fix"
   },
   "keywords": [
     "whatsapp",

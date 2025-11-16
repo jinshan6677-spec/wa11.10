@@ -29,9 +29,7 @@ console.log('✓ 检查项目文件...');
 const requiredFiles = [
   'package.json',
   'src/main.js',
-  'src/config.js',
-  'docker/Dockerfile',
-  'docker/docker-compose.yml'
+  'src/config.js'
 ];
 
 requiredFiles.forEach(file => {
