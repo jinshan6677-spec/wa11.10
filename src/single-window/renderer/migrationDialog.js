@@ -145,7 +145,7 @@ async function handleStartMigration() {
   showScreen('progress');
   
   // Reset progress
-  updateProgress(0, 'Preparing migration...');
+  updateProgress(0, '准备迁移...');
   clearLogs();
   
   // Start migration via IPC
@@ -242,7 +242,7 @@ function handleMigrationComplete(data) {
   state.migrationData = data;
   
   // Update progress to 100%
-  updateProgress(100, 'Migration complete!');
+  updateProgress(100, '迁移完成！');
   
   // Wait a moment before showing results
   setTimeout(() => {
@@ -261,7 +261,7 @@ function handleMigrationError(data) {
   // Show results with error state
   showResults({
     success: false,
-    errors: [data.message || 'Unknown error occurred'],
+    errors: [data.message || '发生未知错误'],
     warnings: [],
     migratedAccounts: []
   });
@@ -289,13 +289,14 @@ function updateStatus(statusText) {
   let icon = '⏳';
   let className = '';
   
-  if (statusText.toLowerCase().includes('complete')) {
+  const lowerStatus = statusText.toLowerCase();
+  if (lowerStatus.includes('complete') || lowerStatus.includes('完成')) {
     icon = '✅';
     className = 'completed';
-  } else if (statusText.toLowerCase().includes('error') || statusText.toLowerCase().includes('fail')) {
+  } else if (lowerStatus.includes('error') || lowerStatus.includes('fail') || lowerStatus.includes('错误') || lowerStatus.includes('失败')) {
     icon = '❌';
     className = 'error';
-  } else if (statusText.toLowerCase().includes('warning')) {
+  } else if (lowerStatus.includes('warning') || lowerStatus.includes('警告')) {
     icon = '⚠️';
     className = 'warning';
   }
@@ -344,12 +345,12 @@ function showResults(data) {
   // Update results icon and title
   if (success) {
     elements.resultsIcon.textContent = '✅';
-    elements.resultsTitle.textContent = 'Migration Complete';
+    elements.resultsTitle.textContent = '迁移完成';
     elements.successInfo.style.display = 'flex';
     elements.errorInfo.style.display = 'none';
   } else {
     elements.resultsIcon.textContent = '❌';
-    elements.resultsTitle.textContent = 'Migration Failed';
+    elements.resultsTitle.textContent = '迁移失败';
     elements.successInfo.style.display = 'none';
     elements.errorInfo.style.display = 'flex';
   }
@@ -392,19 +393,19 @@ function buildSummary(success, accountCount, errorCount, warningCount) {
   const summaryHTML = `
     <div class="summary-card ${success ? 'success' : 'error'}">
       <div class="summary-value">${success ? '✓' : '✗'}</div>
-      <div class="summary-label">Status</div>
+      <div class="summary-label">状态</div>
     </div>
     <div class="summary-card ${accountCount > 0 ? 'success' : ''}">
       <div class="summary-value">${accountCount}</div>
-      <div class="summary-label">Accounts Migrated</div>
+      <div class="summary-label">已迁移账号</div>
     </div>
     <div class="summary-card ${errorCount > 0 ? 'error' : ''}">
       <div class="summary-value">${errorCount}</div>
-      <div class="summary-label">Errors</div>
+      <div class="summary-label">错误</div>
     </div>
     <div class="summary-card ${warningCount > 0 ? 'warning' : ''}">
       <div class="summary-value">${warningCount}</div>
-      <div class="summary-label">Warnings</div>
+      <div class="summary-label">警告</div>
     </div>
   `;
   
@@ -416,14 +417,14 @@ function buildSummary(success, accountCount, errorCount, warningCount) {
  */
 function buildAccountResults(accounts) {
   if (!accounts || accounts.length === 0) {
-    elements.accountResultsList.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No accounts were migrated.</p>';
+    elements.accountResultsList.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">没有账号被迁移。</p>';
     return;
   }
   
   const accountsHTML = accounts.map(account => {
     const success = !account.error;
     const icon = success ? '✅' : '❌';
-    const status = success ? 'Successfully migrated' : account.error;
+    const status = success ? '迁移成功' : account.error;
     
     return `
       <div class="account-result-item ${success ? 'success' : 'error'}">
@@ -447,12 +448,12 @@ function simulateMigration() {
   
   let progress = 0;
   const steps = [
-    { progress: 10, status: 'Detecting old configuration...', delay: 500 },
-    { progress: 20, status: 'Creating backup...', delay: 800 },
-    { progress: 40, status: 'Migrating account configurations...', delay: 1200 },
-    { progress: 60, status: 'Migrating session data...', delay: 1000 },
-    { progress: 80, status: 'Validating migrated data...', delay: 800 },
-    { progress: 100, status: 'Migration complete!', delay: 500 }
+    { progress: 10, status: '检测旧配置...', delay: 500 },
+    { progress: 20, status: '创建备份...', delay: 800 },
+    { progress: 40, status: '迁移账号配置...', delay: 1200 },
+    { progress: 60, status: '迁移会话数据...', delay: 1000 },
+    { progress: 80, status: '验证迁移数据...', delay: 800 },
+    { progress: 100, status: '迁移完成！', delay: 500 }
   ];
   
   function runStep(index) {
@@ -462,11 +463,11 @@ function simulateMigration() {
         showResults({
           success: true,
           errors: [],
-          warnings: ['This is a simulated migration for testing purposes'],
+          warnings: ['这是用于测试目的的模拟迁移'],
           migratedAccounts: [
-            { id: 'acc_001', name: 'Personal WhatsApp' },
-            { id: 'acc_002', name: 'Work Account' },
-            { id: 'acc_003', name: 'Business Account' }
+            { id: 'acc_001', name: '个人 WhatsApp' },
+            { id: 'acc_002', name: '工作账号' },
+            { id: 'acc_003', name: '商务账号' }
           ],
           backupPath: '/path/to/backup/accounts.json.backup-2024-01-01'
         });

@@ -262,7 +262,7 @@ class ErrorDisplay {
       <div class="global-error-content">
         <span class="global-error-icon">${icon}</span>
         <span class="global-error-message">${this._escapeHtml(errorInfo.message)}</span>
-        <button class="global-error-dismiss" title="Dismiss">×</button>
+        <button class="global-error-dismiss" title="关闭">×</button>
       </div>
     `;
 
@@ -316,32 +316,32 @@ class ErrorDisplay {
 
     modal.innerHTML = `
       <div class="error-details-header">
-        <h3>Error Details</h3>
+        <h3>错误详情</h3>
         <button class="error-details-close">×</button>
       </div>
       <div class="error-details-body">
         <div class="error-detail-row">
-          <span class="error-detail-label">Category:</span>
+          <span class="error-detail-label">类别:</span>
           <span class="error-detail-value">${this._escapeHtml(errorInfo.category)}</span>
         </div>
         <div class="error-detail-row">
-          <span class="error-detail-label">Time:</span>
+          <span class="error-detail-label">时间:</span>
           <span class="error-detail-value">${timestamp}</span>
         </div>
         <div class="error-detail-row">
-          <span class="error-detail-label">Message:</span>
+          <span class="error-detail-label">消息:</span>
           <span class="error-detail-value">${this._escapeHtml(errorInfo.message)}</span>
         </div>
         ${errorInfo.accountId ? `
           <div class="error-detail-row">
-            <span class="error-detail-label">Account:</span>
+            <span class="error-detail-label">账号:</span>
             <span class="error-detail-value">${this._escapeHtml(errorInfo.accountId)}</span>
           </div>
         ` : ''}
       </div>
       <div class="error-details-footer">
-        <button class="error-details-copy">Copy Error</button>
-        <button class="error-details-ok">OK</button>
+        <button class="error-details-copy">复制错误</button>
+        <button class="error-details-ok">确定</button>
       </div>
     `;
 
@@ -364,16 +364,16 @@ class ErrorDisplay {
     // Copy handler
     modal.querySelector('.error-details-copy').onclick = () => {
       const errorText = `
-Category: ${errorInfo.category}
-Time: ${timestamp}
-Message: ${errorInfo.message}
-${errorInfo.accountId ? `Account: ${errorInfo.accountId}` : ''}
+类别: ${errorInfo.category}
+时间: ${timestamp}
+消息: ${errorInfo.message}
+${errorInfo.accountId ? `账号: ${errorInfo.accountId}` : ''}
       `.trim();
 
       navigator.clipboard.writeText(errorText).then(() => {
         const btn = modal.querySelector('.error-details-copy');
         const originalText = btn.textContent;
-        btn.textContent = 'Copied!';
+        btn.textContent = '已复制！';
         setTimeout(() => {
           btn.textContent = originalText;
         }, 2000);

@@ -127,7 +127,7 @@
     item.dataset.accountId = account.id;
     item.setAttribute('tabindex', '0');
     item.setAttribute('role', 'button');
-    item.setAttribute('aria-label', `Switch to ${account.name}`);
+    item.setAttribute('aria-label', `切换到 ${account.name}`);
 
     // Mark as active if this is the active account
     if (account.id === activeAccountId) {
@@ -146,8 +146,8 @@
 
     const name = document.createElement('div');
     name.className = 'account-name';
-    name.textContent = account.name || 'Unnamed Account';
-    name.title = account.name || 'Unnamed Account';
+    name.textContent = account.name || '未命名账号';
+    name.title = account.name || '未命名账号';
 
     // Add note if available
     if (account.note) {
@@ -171,21 +171,21 @@
     // Set status text and tooltip based on login and connection status
     if (loginStatus === false && statusValue === 'offline') {
       // Not logged in - show login prompt
-      status.textContent = 'Login Required';
-      status.title = 'Click to scan QR code and login';
+      status.textContent = '需要登录';
+      status.title = '点击扫描二维码登录';
       status.classList.add('login-required');
     } else {
       status.textContent = getStatusText(statusValue);
       
       // Set tooltip based on connection status
       if (account.connectionError) {
-        status.title = `Error: ${account.connectionError.message || 'Unknown error'}`;
+        status.title = `错误: ${account.connectionError.message || '未知错误'}`;
       } else if (statusValue === 'online') {
-        status.title = 'Connected and logged in';
+        status.title = '已连接并登录';
       } else if (statusValue === 'offline') {
-        status.title = 'Not connected';
+        status.title = '未连接';
       } else if (statusValue === 'loading') {
-        status.title = 'Loading...';
+        status.title = '加载中...';
       }
     }
     
@@ -198,8 +198,8 @@
     const editBtn = document.createElement('button');
     editBtn.className = 'edit-btn';
     editBtn.innerHTML = '⚙️';
-    editBtn.title = 'Edit account';
-    editBtn.setAttribute('aria-label', 'Edit account');
+    editBtn.title = '编辑账号';
+    editBtn.setAttribute('aria-label', '编辑账号');
     editBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       handleEditAccount(account.id);
@@ -208,8 +208,8 @@
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'delete-btn';
     deleteBtn.innerHTML = '🗑️';
-    deleteBtn.title = 'Delete account';
-    deleteBtn.setAttribute('aria-label', 'Delete account');
+    deleteBtn.title = '删除账号';
+    deleteBtn.setAttribute('aria-label', '删除账号');
     deleteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       handleDeleteAccount(account.id);
@@ -276,12 +276,12 @@
    */
   function getStatusText(status) {
     const statusMap = {
-      online: 'Online',
-      offline: 'Offline',
-      error: 'Error',
-      loading: 'Loading...'
+      online: '在线',
+      offline: '离线',
+      error: '错误',
+      loading: '加载中...'
     };
-    return statusMap[status] || 'Unknown';
+    return statusMap[status] || '未知';
   }
 
   /**
@@ -348,7 +348,7 @@
    */
   async function handleDeleteAccount(accountId) {
     const account = accounts.find(acc => acc.id === accountId);
-    const accountName = account ? account.name : 'this account';
+    const accountName = account ? account.name : '此账号';
 
     // Confirm deletion
     const confirmed = confirm(`确定要删除账号"${accountName}"吗？\n\n这将删除账号配置但保留会话数据。`);
@@ -496,21 +496,21 @@
       if (statusElement) {
         if (hasQRCode) {
           // Show login required prompt
-          statusElement.textContent = 'Login Required';
-          statusElement.title = 'Click to scan QR code and login';
+          statusElement.textContent = '需要登录';
+          statusElement.title = '点击扫描二维码登录';
           statusElement.classList.add('login-required');
           statusElement.classList.remove('online', 'error');
           statusElement.classList.add('offline');
         } else if (isLoggedIn) {
           // Show logged in status
-          statusElement.textContent = 'Online';
-          statusElement.title = 'Connected and logged in';
+          statusElement.textContent = '在线';
+          statusElement.title = '已连接并登录';
           statusElement.classList.remove('login-required', 'offline', 'error');
           statusElement.classList.add('online');
         } else {
           // Loading or unclear status
-          statusElement.textContent = 'Loading...';
-          statusElement.title = 'Loading...';
+          statusElement.textContent = '加载中...';
+          statusElement.title = '加载中...';
           statusElement.classList.remove('login-required', 'online', 'error');
           statusElement.classList.add('offline');
         }
@@ -559,34 +559,34 @@
       if (statusElement) {
         // Set text and tooltip based on connection details and login status
         if (connectionStatus === 'online') {
-          statusElement.textContent = 'Online';
-          statusElement.title = 'Connected and logged in';
+          statusElement.textContent = '在线';
+          statusElement.title = '已连接并登录';
           statusElement.classList.remove('login-required', 'offline', 'error');
           statusElement.classList.add('online');
         } else if (connectionStatus === 'offline') {
           if (hasQRCode || (details && details.needsQRScan)) {
             // Show login required prompt
-            statusElement.textContent = 'Login Required';
-            statusElement.title = 'Click to scan QR code and login';
+            statusElement.textContent = '需要登录';
+            statusElement.title = '点击扫描二维码登录';
             statusElement.classList.add('login-required');
             statusElement.classList.remove('online', 'error');
           } else if (details && details.phoneDisconnected) {
-            statusElement.textContent = 'Offline';
-            statusElement.title = 'Phone not connected';
+            statusElement.textContent = '离线';
+            statusElement.title = '手机未连接';
             statusElement.classList.remove('login-required', 'online', 'error');
           } else if (details && details.loading) {
-            statusElement.textContent = 'Loading...';
-            statusElement.title = 'Loading...';
+            statusElement.textContent = '加载中...';
+            statusElement.title = '加载中...';
             statusElement.classList.remove('login-required', 'online', 'error');
           } else {
-            statusElement.textContent = 'Offline';
-            statusElement.title = 'Not connected';
+            statusElement.textContent = '离线';
+            statusElement.title = '未连接';
             statusElement.classList.remove('login-required', 'online', 'error');
           }
         } else if (connectionStatus === 'error') {
-          const errorMsg = error ? error.message : 'Connection error';
-          statusElement.textContent = 'Error';
-          statusElement.title = `Error: ${errorMsg}`;
+          const errorMsg = error ? error.message : '连接错误';
+          statusElement.textContent = '错误';
+          statusElement.title = `错误: ${errorMsg}`;
           statusElement.classList.remove('login-required', 'online', 'offline');
           statusElement.classList.add('error');
         }
@@ -627,7 +627,7 @@
    */
   function getAccountName(accountId) {
     const account = accounts.find(acc => acc.id === accountId);
-    return account ? account.name : 'Unknown Account';
+    return account ? account.name : '未知账号';
   }
 
   /**
