@@ -1,813 +1,585 @@
-# 常见问题解答 (FAQ)
+# Frequently Asked Questions (FAQ)
 
-## 目录
+## Table of Contents
 
-- [基础问题](#基础问题)
-- [功能相关](#功能相关)
-- [配置问题](#配置问题)
-- [性能问题](#性能问题)
-- [安全隐私](#安全隐私)
-- [故障排除](#故障排除)
-- [费用相关](#费用相关)
-
----
-
-## 基础问题
-
-### Q: 这个翻译功能是如何工作的？
-
-**A**: 翻译系统通过以下方式工作：
-
-1. **内容脚本注入**: 在 WhatsApp Web 页面中注入 JavaScript 代码
-2. **消息监听**: 使用 MutationObserver 监听新消息
-3. **翻译请求**: 通过 IPC 通信将文本发送到主进程
-4. **调用翻译 API**: 主进程调用配置的翻译引擎
-5. **显示结果**: 将翻译结果显示在消息下方
-
-整个过程是自动的，不需要手动操作。
-
-### Q: 需要安装额外的软件吗？
-
-**A**: 不需要。翻译功能已经集成在 WhatsApp Desktop 应用中，只需：
-
-1. 启动应用
-2. 在设置中配置翻译引擎
-3. 启用自动翻译
-
-如果使用 AI 翻译引擎，需要准备相应的 API 密钥。
-
-### Q: 支持哪些平台？
-
-**A**: 支持所有主流桌面平台：
-
-- ✅ Windows 10/11
-- ✅ macOS 12+
-- ✅ Linux (Ubuntu 20.04+, Debian, Fedora 等)
-
-### Q: 是否支持移动端？
-
-**A**: 目前不支持。本翻译功能仅适用于桌面版 WhatsApp。
-
-移动端可以使用：
-- WhatsApp 官方应用的内置翻译功能（部分地区）
-- 系统级翻译功能（iOS 15+, Android 12+）
-
-### Q: 会影响 WhatsApp 的正常功能吗？
-
-**A**: 不会。翻译功能是作为增强功能添加的，不会影响：
-
-- ✅ 消息发送和接收
-- ✅ 语音和视频通话
-- ✅ 文件传输
-- ✅ 状态更新
-- ✅ 所有其他 WhatsApp 功能
+1. [General Questions](#general-questions)
+2. [Account Management](#account-management)
+3. [Migration](#migration)
+4. [Proxy Configuration](#proxy-configuration)
+5. [Translation Features](#translation-features)
+6. [Performance](#performance)
+7. [Troubleshooting](#troubleshooting)
+8. [Security & Privacy](#security--privacy)
+9. [Technical Questions](#technical-questions)
 
 ---
 
-## 功能相关
+## General Questions
 
-### Q: 可以翻译语音消息吗？
+### What is the single-window architecture?
 
-**A**: 目前语音消息翻译功能正在开发中（任务 9）。
+The single-window architecture consolidates all your WhatsApp accounts into one unified window with a sidebar for account management. Instead of having multiple separate windows (one per account), you now have one window with all accounts accessible from a sidebar.
 
-计划功能：
-- 语音转文本（使用 Whisper API）
-- 自动翻译识别的文本
-- 在语音消息下方显示文本和翻译
+### Why did you change from multi-window to single-window?
 
-### Q: 可以翻译图片中的文字吗？
+The single-window architecture provides several benefits:
+- **Less clutter**: One window instead of many
+- **Faster switching**: Instant account switching without window management
+- **Better organization**: All accounts visible in one place
+- **Improved performance**: Optimized memory usage and resource management
+- **Modern UX**: Consistent with modern multi-account applications
 
-**A**: 目前图片文字翻译功能正在开发中（任务 10）。
+### Is this a mandatory update?
 
-计划功能：
-- OCR 识别图片文字（使用 Tesseract.js）
-- 自动翻译识别的文本
-- 在图片下方显示文本和翻译
+Yes, the single-window architecture is the new standard. However, your data and accounts will be automatically migrated, and you won't lose any information.
 
-### Q: 可以翻译表情符号吗？
+### Can I still use the old multi-window version?
 
-**A**: 表情符号不会被翻译，因为它们是通用的视觉符号。
+While the old version may still work, it's no longer supported. We recommend migrating to the single-window version for the best experience and continued updates.
 
-但是：
-- ✅ 包含表情的文本会正常翻译
-- ✅ 表情符号会保留在翻译结果中
-- ✅ 某些翻译引擎可能会解释表情含义
+### Will I lose my chat history?
 
-### Q: 可以翻译链接和文件名吗？
-
-**A**: 系统会智能处理：
-
-- ❌ URL 链接不会被翻译（保持原样）
-- ❌ 文件名通常不翻译
-- ✅ 链接周围的文本会正常翻译
-- ✅ 可以在设置中配置是否翻译特殊内容
-
-### Q: 群组消息会自动翻译吗？
-
-**A**: 取决于您的配置：
-
-- 默认情况下，群组消息**不会**自动翻译
-- 可以在设置中启用 **翻译群组消息**
-- 建议根据群组语言情况决定
-
-**原因**: 群组消息通常较多，自动翻译可能：
-- 增加 API 调用成本
-- 影响阅读体验
-- 消耗更多流量
-
-### Q: 可以选择不翻译某些联系人吗？
-
-**A**: 可以。有两种方法：
-
-**方法 1**: 使用好友独立配置
-- 为特定联系人禁用翻译
-- 其他联系人继续使用全局配置
-
-**方法 2**: 临时禁用
-- 在聊天窗口中点击翻译按钮
-- 选择 "暂停翻译"
-- 需要时再重新启用
-
-### Q: 翻译结果可以编辑吗？
-
-**A**: 翻译结果本身不能直接编辑，但您可以：
-
-1. **重新翻译**: 点击翻译按钮再次翻译
-2. **手动修改**: 在输入框中修改翻译后的文本
-3. **使用不同引擎**: 切换翻译引擎获得不同结果
-4. **调整风格**: 更改翻译风格（AI 引擎）
-
-### Q: 可以同时显示多种语言的翻译吗？
-
-**A**: 目前不支持。每次只能翻译成一种目标语言。
-
-如果需要多语言翻译：
-1. 翻译成第一种语言
-2. 复制翻译结果
-3. 更改目标语言
-4. 再次翻译
+No, your chat history is stored by WhatsApp on their servers and on your phone. The desktop application only displays this data. Migration only affects the application configuration, not your WhatsApp data.
 
 ---
 
-## 配置问题
+## Account Management
 
-### Q: 如何获取 API 密钥？
+### How many accounts can I have?
 
-**A**: 不同翻译引擎的获取方式：
+Technically, you can have up to 50 accounts, but we recommend keeping it under 10 for optimal performance. Each account consumes memory and system resources.
 
-**Google 翻译**:
-- 无需 API 密钥，直接使用
+### Do I need to re-scan QR codes after migration?
 
-**GPT-4 (OpenAI)**:
-1. 访问 https://platform.openai.com/api-keys
-2. 注册/登录账号
-3. 点击 "Create new secret key"
-4. 复制密钥（格式：`sk-...`）
-5. 充值账户余额
+No, your login states are preserved during migration. You should remain logged in to all your accounts after the migration completes.
 
-**Gemini (Google AI)**:
-1. 访问 https://makersuite.google.com/app/apikey
-2. 登录 Google 账号
-3. 点击 "Create API key"
-4. 复制密钥
+### Can I use the same WhatsApp account on multiple profiles?
 
-**DeepSeek**:
-1. 访问 https://platform.deepseek.com/
-2. 注册账号
-3. 进入 API Keys 页面
-4. 创建新密钥
-5. 充值账户
+No, WhatsApp only allows one active desktop session per account. If you log in on another device or profile, you'll be logged out from the previous session.
 
-### Q: API 密钥会过期吗？
+### How do I organize my accounts?
 
-**A**: 取决于 API 提供商：
+You can:
+- **Drag and drop** accounts to reorder them in the sidebar
+- **Use descriptive names** like "Work - Sales" or "Personal"
+- **Add notes** to provide additional context
+- **Order by priority** with most-used accounts at the top
 
-- **OpenAI**: 密钥不会自动过期，但可以手动撤销
-- **Gemini**: 密钥长期有效
-- **DeepSeek**: 密钥长期有效
+### Can I export my account configurations?
 
-但是：
-- ⚠️ 账户余额不足时无法使用
-- ⚠️ 违反服务条款可能被封禁
-- ⚠️ 长期不用可能被回收
+Yes, go to **Settings → Export Configuration** to save your account configurations to a JSON file. This is useful for backups or transferring to another computer.
 
-### Q: 可以使用免费的 API 吗？
+### What happens to my session data when I delete an account?
 
-**A**: 部分引擎提供免费额度：
+When deleting an account, you'll be asked whether to:
+- **Keep session data**: You can re-add the account later without re-logging in
+- **Delete session data**: Completely removes all data (requires re-login if re-added)
 
-| 引擎 | 免费额度 | 限制 |
-|------|---------|------|
-| Google 翻译 | 完全免费 | 无 |
-| GPT-4 | 新用户 $5 | 3 个月有效 |
-| Gemini | 60 次/分钟 | 需要 API 密钥 |
-| DeepSeek | 新用户赠送 | 有限额度 |
+### Can I rename an account after creating it?
 
-**建议**:
-- 日常使用 Google 翻译（免费）
-- 重要场合使用 AI 翻译（付费）
+Yes, click the **⚙️** (settings) button next to the account, change the name, and click **Save**.
 
-### Q: 如何测试 API 配置是否正确？
+### How do I log out of an account?
 
-**A**: 在翻译设置中：
+To log out:
+1. Click **⚙️** next to the account
+2. Scroll to **Session Management**
+3. Click **"Clear Session Data"**
+4. Confirm the action
 
-1. 输入 API 密钥和端点
-2. 点击 **测试连接** 按钮
-3. 系统会发送测试请求
-4. 显示测试结果：
-   - ✅ 连接成功：配置正确
-   - ❌ 连接失败：检查配置
-
-常见失败原因：
-- API 密钥错误
-- API 端点 URL 错误
-- 网络连接问题
-- 账户余额不足
-
-### Q: 可以使用代理吗？
-
-**A**: 可以。系统会使用系统代理设置。
-
-**配置方法**:
-
-**Windows**:
-1. 设置 → 网络和 Internet → 代理
-2. 配置代理服务器
-
-**macOS**:
-1. 系统偏好设置 → 网络
-2. 高级 → 代理
-
-**Linux**:
-```bash
-export HTTP_PROXY=http://proxy.example.com:8080
-export HTTPS_PROXY=http://proxy.example.com:8080
-```
-
-应用会自动使用系统代理。
-
-### Q: 配置会同步到其他设备吗？
-
-**A**: 不会。配置存储在本地：
-
-- ❌ 不会自动同步
-- ❌ 不会上传到云端
-- ✅ 可以手动导出/导入配置
-
-**手动同步方法**:
-1. 在设置中点击 **导出配置**
-2. 保存配置文件
-3. 在其他设备上点击 **导入配置**
-4. 选择配置文件
+This will log you out and you'll need to scan the QR code again.
 
 ---
 
-## 性能问题
+## Migration
 
-### Q: 翻译速度慢怎么办？
+### How long does migration take?
 
-**A**: 优化翻译速度的方法：
+Migration typically takes 1-2 minutes for most users. The time depends on:
+- Number of accounts (more accounts = longer time)
+- System performance
+- Size of session data
 
-**1. 使用缓存**
-- 系统自动缓存翻译结果
-- 相同内容第二次翻译会很快
-- 缓存命中率通常 > 60%
+### What if migration fails?
 
-**2. 选择快速引擎**
-- Google 翻译：< 1 秒
-- AI 翻译：1-3 秒
+If migration fails:
+1. Check the migration log for specific errors
+2. Try manual migration (see [Migration Guide](MIGRATION_GUIDE.md))
+3. Restore from the automatic backup
+4. Contact support with the log file
 
-**3. 优化网络**
-- 使用稳定的网络连接
-- 选择地理位置近的 API 端点
-- 使用国内服务（如 DeepSeek）
+### Can I rollback to the old version?
 
-**4. 减少并发请求**
-- 禁用实时翻译预览
-- 不要同时翻译大量消息
+Yes, you can rollback using the backup created during migration. See the [Rollback Instructions](MIGRATION_GUIDE.md#rollback-instructions) in the Migration Guide.
 
-### Q: 翻译会占用多少内存？
+### Will my window positions be preserved?
 
-**A**: 翻译模块的内存占用：
+No, window positions are replaced by the sidebar order. Accounts are ordered based on their previous window positions (left to right, top to bottom).
 
-- **正常使用**: 30-50 MB
-- **大量缓存**: 50-100 MB
-- **峰值**: < 150 MB
+### What gets backed up during migration?
 
-**优化方法**:
-- 定期清理缓存
-- 限制缓存大小
-- 关闭不需要的功能
+The migration process creates a backup of:
+- Old configuration file (`accounts-old.json`)
+- Window state data
+- Migration log
 
-### Q: 翻译会消耗多少流量？
+Session data is NOT backed up (it's not modified during migration).
 
-**A**: 流量消耗取决于使用情况：
+### Can I migrate on multiple computers?
 
-**单条消息**:
-- Google 翻译: 1-2 KB
-- AI 翻译: 2-5 KB
-
-**每天 100 条消息**:
-- Google 翻译: 100-200 KB
-- AI 翻译: 200-500 KB
-
-**缓存命中**:
-- 0 KB（使用本地缓存）
-
-**节省流量**:
-- ✅ 启用缓存（默认启用）
-- ✅ 禁用实时翻译
-- ✅ 不翻译群组消息
-
-### Q: 翻译会影响电池续航吗？
-
-**A**: 影响很小：
-
-- **正常使用**: 几乎无影响
-- **大量翻译**: 轻微增加功耗
-- **实时翻译**: 稍微增加功耗
-
-**优化续航**:
-- 禁用实时翻译预览
-- 使用缓存减少网络请求
-- 不翻译群组消息
-
-### Q: 可以限制 API 调用次数吗？
-
-**A**: 可以通过以下方式控制：
-
-1. **启用缓存**: 减少重复请求
-2. **禁用实时翻译**: 避免频繁请求
-3. **不翻译群组**: 减少消息量
-4. **设置每日限额**: 在设置中配置（开发中）
+Yes, you can migrate on each computer independently. If you want to sync configurations:
+1. Export configuration from one computer
+2. Import it on another computer
+3. You'll still need to log in on each computer
 
 ---
 
-## 安全隐私
+## Proxy Configuration
 
-### Q: 翻译的消息会被保存吗？
+### Why would I use a proxy?
 
-**A**: 部分数据会本地缓存：
+Proxies are useful for:
+- **Privacy**: Masking your IP address
+- **Access**: Bypassing network restrictions
+- **Geographic routing**: Accessing region-specific features
+- **Security**: Routing through secure networks
+- **Testing**: Simulating different network conditions
 
-**会保存**:
-- ✅ 翻译结果（缓存 7 天）
-- ✅ 翻译配置
-- ✅ 统计数据
+### What proxy protocols are supported?
 
-**不会保存**:
-- ❌ 完整的聊天记录
-- ❌ 个人身份信息
-- ❌ 上传到云端
+We support:
+- **HTTP**: Standard HTTP proxy
+- **HTTPS**: Secure HTTP proxy
+- **SOCKS5**: Most versatile, supports any protocol
 
-**清除方法**:
-- 在设置中点击 **清除翻译缓存**
-- 手动删除缓存文件
+SOCKS5 is recommended for most use cases.
 
-### Q: API 密钥安全吗？
+### Can each account have a different proxy?
 
-**A**: 是的，我们采取了多重安全措施：
+Yes! Each account can have its own independent proxy configuration. This allows you to route different accounts through different networks.
 
-**加密存储**:
-- 使用 Electron safeStorage 加密
-- 密钥不以明文存储
-- 使用系统级加密
+### How do I test if my proxy is working?
 
-**安全传输**:
-- 所有请求使用 HTTPS
-- 验证 SSL 证书
-- 不经过第三方服务器
+1. Configure the proxy in account settings
+2. Click **"Test Connection"** button
+3. The application will verify the proxy is reachable
+4. If successful, click **"Save"** to apply
 
-**访问控制**:
-- 只有主进程可以访问密钥
-- 渲染进程无法直接读取
-- 不在日志中记录完整密钥
+You can also check by:
+- Visiting a "What's my IP" website in the account
+- Checking connection status in the sidebar
 
-### Q: 翻译内容会被第三方看到吗？
+### My proxy requires authentication, how do I set it up?
 
-**A**: 取决于使用的翻译引擎：
+When configuring the proxy:
+1. Enable the proxy
+2. Enter host and port
+3. Fill in the **Username** field
+4. Fill in the **Password** field
+5. Test and save
 
-**Google 翻译**:
-- 内容会发送到 Google 服务器
-- 遵守 Google 隐私政策
-- 不会用于广告定向
+The credentials are stored securely and encrypted.
 
-**AI 翻译（GPT-4、Gemini 等）**:
-- 内容会发送到 API 提供商
-- 遵守各自的隐私政策
-- OpenAI: 不用于训练模型（API 数据）
-- Google: 遵守 Gemini 隐私政策
+### Can I use a local proxy like Shadowsocks?
 
-**自托管 API**:
-- 完全由您控制
-- 不会泄露给第三方
+Yes! Configure it as:
+```
+Protocol: SOCKS5
+Host: 127.0.0.1
+Port: 1080 (or your Shadowsocks port)
+```
 
-### Q: 可以完全离线使用吗？
+### What if my proxy stops working?
 
-**A**: 不能完全离线，但部分功能可以：
+If your proxy fails:
+1. Check the proxy server is running
+2. Verify credentials are correct
+3. Test with another application
+4. Try disabling and re-enabling
+5. Check the error message in the account status
 
-**可以离线**:
-- ✅ 查看已缓存的翻译
-- ✅ 修改配置
-- ✅ 查看统计数据
+The account will show an error indicator if the proxy fails.
 
-**需要联网**:
-- ❌ 新的翻译请求
-- ❌ API 密钥验证
-- ❌ 语言检测
+### Can I bypass the proxy for certain domains?
 
-**未来计划**:
-- 本地翻译模型（开发中）
-- 离线语言包
-
-### Q: 会收集用户数据吗？
-
-**A**: 不会。我们不收集任何用户数据：
-
-- ❌ 不收集聊天内容
-- ❌ 不收集个人信息
-- ❌ 不收集使用统计
-- ❌ 不上传到服务器
-
-**本地存储**:
-- ✅ 所有数据存储在本地
-- ✅ 您完全控制数据
-- ✅ 可以随时删除
+Currently, bypass rules are not supported in the UI, but you can manually edit the configuration file to add bypass rules.
 
 ---
 
-## 故障排除
+## Translation Features
 
-### Q: 翻译按钮不显示怎么办？
+### Which translation engines are supported?
 
-**可能原因和解决方法**:
+We support:
+- **Google Translate** (Free): No API key required, fast and reliable
+- **GPT-4** (Paid): Requires OpenAI API key, high-quality translations
+- **Gemini** (Paid): Requires Google AI API key, good balance
+- **DeepSeek** (Paid): Requires DeepSeek API key, cost-effective
 
-**1. WhatsApp Web 未加载完成**
-- 等待页面完全加载
-- 刷新页面（Ctrl+R）
+### Do I need an API key for translation?
 
-**2. 脚本注入失败**
-- 重启应用
-- 检查控制台错误（F12）
+- **Google Translate**: No API key required
+- **GPT-4, Gemini, DeepSeek**: API key required
 
-**3. 版本不兼容**
-- 更新到最新版本
-- 检查 WhatsApp Web 是否更新
+### Can each account have different translation settings?
 
-### Q: 翻译请求一直失败怎么办？
+Yes! Each account can have:
+- Different target language
+- Different translation engine
+- Different API keys
+- Different auto-translate settings
 
-**排查步骤**:
+### How do I translate a message?
 
-**1. 检查 API 配置**
-```
-设置 → 翻译引擎 → 测试连接
-```
+**Manual translation:**
+1. Right-click on any message
+2. Select **"Translate Message"**
+3. The translation appears below the original
 
-**2. 检查网络连接**
-```bash
-# 测试 API 可达性
-ping api.openai.com
-```
+**Auto-translation:**
+1. Enable auto-translate in account settings
+2. Incoming messages are automatically translated
+3. Toggle on/off with the button in chat header
 
-**3. 检查账户余额**
-- 登录 API 提供商网站
-- 查看账户余额和使用情况
+### Are translations cached?
 
-**4. 查看错误日志**
-- 打开开发者工具（F12）
-- 查看 Console 标签页
-- 搜索 "Translation Error"
+Yes, translations are cached per account to improve performance and reduce API calls. You can clear the cache in account settings if needed.
 
-**5. 尝试其他引擎**
-- 切换到 Google 翻译测试
-- 如果 Google 翻译正常，说明是 API 配置问题
+### Can I translate my outgoing messages?
 
-### Q: 缓存不工作怎么办？
+Yes, enable **"Translate Input"** in translation settings. Then:
+1. Type your message in your native language
+2. Click the **"Translate"** button
+3. The translated message is sent
 
-**检查方法**:
+### How much do paid translation engines cost?
 
-**1. 验证缓存功能**
-- 翻译同一条消息两次
-- 第二次应该很快（< 100ms）
+Costs vary by provider:
+- **GPT-4**: ~$0.03 per 1K tokens (varies by model)
+- **Gemini**: ~$0.001 per 1K characters
+- **DeepSeek**: ~$0.001 per 1K tokens
 
-**2. 检查缓存文件**
-- Windows: `%APPDATA%/whatsapp-desktop/translation/cache.db`
-- macOS: `~/Library/Application Support/whatsapp-desktop/translation/cache.db`
-- Linux: `~/.config/whatsapp-desktop/translation/cache.db`
+Check each provider's pricing page for current rates.
 
-**3. 重建缓存**
-- 删除缓存文件
-- 重启应用
-- 系统会自动创建新缓存
+### Can I use different languages for different contacts?
 
-### Q: 翻译结果乱码怎么办？
+Yes! You can configure per-contact translation settings:
+1. Open a chat with the contact
+2. Click **"⋮"** (more) menu
+3. Select **"Translation Settings"**
+4. Configure contact-specific settings
 
-**可能原因**:
+### Why are my translations poor quality?
 
-**1. 编码问题**
-- 检查源语言设置
-- 尝试选择 "自动检测"
+Translation quality depends on:
+- **Engine choice**: Paid engines generally provide better quality
+- **Language pair**: Some language pairs are better supported
+- **Context**: Short messages may lack context
+- **Slang/idioms**: May not translate well
 
-**2. API 响应异常**
-- 切换到其他翻译引擎
-- 检查 API 文档
-
-**3. 特殊字符处理**
-- 某些特殊字符可能显示异常
-- 这是正常现象，不影响理解
-
-### Q: 应用崩溃或卡死怎么办？
-
-**紧急处理**:
-
-**1. 强制关闭**
-- Windows: Ctrl+Alt+Del → 任务管理器
-- macOS: Cmd+Option+Esc
-- Linux: killall whatsapp-desktop
-
-**2. 清除缓存**
-```bash
-# 删除所有缓存和配置
-rm -rf ~/.config/whatsapp-desktop/translation/
-```
-
-**3. 重新安装**
-- 卸载应用
-- 删除配置目录
-- 重新安装
-
-**预防措施**:
-- 定期清理缓存
-- 不要同时翻译大量消息
-- 保持应用更新
+Try a different engine or language setting.
 
 ---
 
-## 费用相关
+## Performance
 
-### Q: 使用翻译功能需要付费吗？
+### How much memory does the application use?
 
-**A**: 取决于使用的翻译引擎：
+Typical memory usage:
+- **Base application**: ~200MB
+- **Per account**: ~150-200MB
+- **10 accounts**: ~2GB total
 
-**免费**:
-- ✅ Google 翻译：完全免费
-- ✅ 应用本身：免费开源
+Memory usage varies based on:
+- Number of active accounts
+- Chat history loaded
+- Media cached
+- Translation cache size
 
-**付费**:
-- 💰 GPT-4：按使用量付费
-- 💰 Gemini：有免费额度，超出付费
-- 💰 DeepSeek：按使用量付费
+### Why is the application slow?
 
-### Q: AI 翻译大概多少钱？
+Common causes:
+- **Too many accounts**: Reduce to under 10
+- **Low system resources**: Close other applications
+- **Large cache**: Clear browser cache
+- **Network issues**: Check internet connection
+- **Outdated version**: Update to latest version
 
-**A**: 不同引擎的价格：
+### How can I improve performance?
 
-**GPT-4**:
-- 输入：$0.03 / 1K tokens
-- 输出：$0.06 / 1K tokens
-- 一条消息约 $0.001-0.005
+1. **Limit accounts**: Keep only what you need
+2. **Close unused accounts**: Delete accounts you don't use
+3. **Clear cache**: Regularly clear browser and translation cache
+4. **Restart periodically**: Restart every few days
+5. **Update regularly**: Keep application up to date
+6. **Optimize system**: Ensure adequate RAM and CPU
 
-**GPT-4 Turbo**:
-- 输入：$0.01 / 1K tokens
-- 输出：$0.03 / 1K tokens
-- 一条消息约 $0.0003-0.002
+### Does having many accounts slow down switching?
 
-**Gemini Pro**:
-- 免费：60 次/分钟
-- 付费：$0.00025 / 1K tokens
+No, account switching is optimized to be instant. However, having many accounts increases overall memory usage, which can affect system performance.
 
-**DeepSeek**:
-- $0.0014 / 1K tokens
-- 一条消息约 $0.0001-0.0005
+### Can I limit memory usage per account?
 
-**每月成本估算**:
-- 每天 100 条消息
-- 使用 GPT-4 Turbo
-- 约 $3-6 / 月
+Currently, memory limits are set automatically. Future versions may allow manual configuration.
 
-### Q: 如何控制翻译成本？
+### Why does the application use so much disk space?
 
-**A**: 节省成本的方法：
+Disk space is used for:
+- **Session data**: Cookies, cache, local storage per account
+- **Media cache**: Images, videos, documents
+- **Translation cache**: Cached translations
+- **Logs**: Application and error logs
 
-**1. 优先使用免费引擎**
-- 日常聊天用 Google 翻译
-- 重要场合用 AI 翻译
-
-**2. 启用缓存**
-- 减少重复翻译
-- 缓存命中率 > 60%
-
-**3. 选择性翻译**
-- 不翻译群组消息
-- 禁用实时翻译预览
-- 只翻译重要联系人
-
-**4. 使用便宜的引擎**
-- DeepSeek 比 GPT-4 便宜 10 倍
-- Gemini 有免费额度
-
-**5. 设置每日限额**
-- 在设置中配置（开发中）
-- 超出限额自动切换到免费引擎
-
-### Q: 可以查看翻译费用统计吗？
-
-**A**: 可以查看使用统计（任务 12 开发中）：
-
-**统计内容**:
-- 每日/每周/每月翻译次数
-- 翻译字符数
-- 各引擎使用情况
-- 缓存命中率
-
-**费用估算**:
-- 根据使用量估算费用
-- 显示各引擎成本
-- 提供优化建议
-
-**查看方法**:
-```
-设置 → 翻译统计 → 使用情况
-```
-
-### Q: API 余额不足会怎样？
-
-**A**: 系统会自动处理：
-
-**1. 显示警告**
-- 提示余额不足
-- 建议充值或切换引擎
-
-**2. 自动降级**
-- 切换到备用引擎
-- 最终降级到 Google 翻译
-
-**3. 记录日志**
-- 记录失败原因
-- 统计失败次数
-
-**预防措施**:
-- 设置余额提醒
-- 配置多个引擎
-- 启用自动降级
+You can clear cache to free up space.
 
 ---
 
-## 其他问题
+## Troubleshooting
 
-### Q: 支持哪些语言？
+### Account won't load / shows blank screen
 
-**A**: 支持 100+ 语言，包括：
+**Try these steps:**
+1. Right-click account → **Reload**
+2. Check internet connection
+3. Disable proxy (if enabled)
+4. Clear session data and re-login
+5. Check for error messages in logs
 
-**常用语言**:
-- 中文（简体/繁体）
-- 英语
-- 日语
-- 韩语
-- 法语
-- 德语
-- 西班牙语
-- 俄语
-- 阿拉伯语
-- 葡萄牙语
-- 意大利语
-- 荷兰语
-- 波兰语
-- 土耳其语
-- 泰语
-- 越南语
-- 印尼语
-- 马来语
-- 印地语
+### Can't switch between accounts
 
-**查看完整列表**:
-```
-设置 → 语言选择 → 查看所有语言
-```
+**Try these steps:**
+1. Check for error indicator on account
+2. Restart the application
+3. Try keyboard shortcut (`Ctrl+1`, etc.)
+4. Check application logs for errors
+5. Verify account is not in error state
 
-### Q: 可以贡献代码吗？
+### QR code won't scan
 
-**A**: 当然可以！我们欢迎贡献：
+**Try these steps:**
+1. Ensure phone has internet connection
+2. Update WhatsApp on your phone
+3. Try scanning again (QR code refreshes)
+4. Clear session data and try again
+5. Check if WhatsApp Web is supported in your region
 
-**贡献方式**:
-1. Fork 项目
-2. 创建特性分支
-3. 提交代码
-4. 创建 Pull Request
+### Messages not sending/receiving
 
-**贡献内容**:
-- 🐛 修复 Bug
-- ✨ 新功能
-- 📝 文档改进
-- 🌍 翻译界面
-- 🎨 UI 优化
+**Try these steps:**
+1. Check internet connection
+2. Verify account shows as online
+3. Check proxy settings (if enabled)
+4. Reload the account
+5. Check WhatsApp service status
 
-**开发指南**:
-- 查看 `docs/DEVELOPER_GUIDE.md`
-- 遵循代码规范
-- 添加测试
-- 更新文档
+### Application crashes on startup
 
-### Q: 如何报告 Bug？
+**Try these steps:**
+1. Check system requirements
+2. Delete window state file
+3. Restore from backup
+4. Reinstall application
+5. Check logs for error details
 
-**A**: 通过 GitHub Issues 报告：
+### Sidebar is too narrow/wide
 
-**报告内容**:
-1. **问题描述**: 详细描述问题
-2. **复现步骤**: 如何触发问题
-3. **预期行为**: 应该如何工作
-4. **实际行为**: 实际发生了什么
-5. **环境信息**:
-   - 操作系统和版本
-   - 应用版本
-   - 翻译引擎
-6. **截图/日志**: 如果可能
+**To resize:**
+1. Hover over the right edge of the sidebar
+2. Cursor changes to resize handle
+3. Click and drag to desired width
+4. Release to set
 
-**模板**:
-```markdown
-## 问题描述
-[描述问题]
+**To reset:**
+1. Go to **Settings → Reset Layout**
+2. Sidebar returns to default width
 
-## 复现步骤
-1. [步骤 1]
-2. [步骤 2]
-3. [步骤 3]
+### Translation not working
 
-## 预期行为
-[应该如何工作]
+**Try these steps:**
+1. Verify translation is enabled
+2. Check API key (for paid engines)
+3. Test with different engine
+4. Clear translation cache
+5. Check internet connection
+6. Verify API key has credits
 
-## 实际行为
-[实际发生了什么]
+### High CPU usage
 
-## 环境信息
-- OS: Windows 11
-- App Version: 1.0.0
-- Engine: GPT-4
-
-## 截图
-[如果有]
-
-## 日志
-[如果有]
-```
-
-### Q: 未来会有哪些新功能？
-
-**A**: 计划中的功能：
-
-**短期（1-3 个月）**:
-- ✅ 语音消息翻译
-- ✅ 图片文字翻译
-- ✅ 翻译统计和监控
-- ✅ 性能优化
-
-**中期（3-6 个月）**:
-- 🔮 本地翻译模型
-- 🔮 多账号支持
-- 🔮 翻译历史搜索
-- 🔮 自定义术语表
-
-**长期（6-12 个月）**:
-- 🔮 团队协作功能
-- 🔮 翻译质量评分
-- 🔮 AI 对话助手
-- 🔮 更多平台支持
-
-**投票功能**:
-- 在 GitHub Discussions 投票
-- 影响开发优先级
+**Try these steps:**
+1. Check which account is active
+2. Close unused accounts
+3. Disable hardware acceleration
+4. Update graphics drivers
+5. Restart application
+6. Check for malware
 
 ---
 
-## 获取帮助
+## Security & Privacy
 
-如果您的问题没有在这里找到答案：
+### Is my data secure?
 
-### 1. 查看文档
+Yes, your data is secure:
+- **Session isolation**: Each account has separate storage
+- **Encrypted storage**: Sensitive data is encrypted
+- **No cloud sync**: Data stays on your device
+- **Secure connections**: HTTPS for all communications
 
-- 📖 [用户指南](USER_GUIDE.md)
-- 📖 [开发者文档](DEVELOPER_GUIDE.md)
-- 📖 [API 文档](API.md)
+### Are my proxy credentials stored securely?
 
-### 2. 搜索 Issues
+Yes, proxy credentials are:
+- Encrypted at rest
+- Never transmitted except to the proxy server
+- Stored in secure system keychain (where available)
+- Not included in logs or error reports
 
-- 访问 GitHub Issues
-- 搜索相关问题
-- 查看已关闭的 Issues
+### Can other accounts see my messages?
 
-### 3. 提问
+No, each account has complete session isolation. Accounts cannot access each other's data, cookies, or storage.
 
-- 创建新的 Issue
-- 在 Discussions 发帖
-- 发送邮件到支持邮箱
+### Are my API keys secure?
 
-### 4. 社区
+Yes, API keys are:
+- Encrypted in the configuration file
+- Never logged or transmitted except to the API provider
+- Stored separately per account
+- Can be removed at any time
 
-- 加入 Discord 服务器
-- 关注 Twitter 更新
-- 订阅邮件列表
+### Does the application collect telemetry?
+
+The application does not collect telemetry or usage data by default. You can opt-in to anonymous crash reporting to help improve the application.
+
+### Can I use the application offline?
+
+You need an internet connection to use WhatsApp Web. However, the application itself can start offline, and you can manage account configurations without internet.
+
+### Is end-to-end encryption maintained?
+
+Yes, WhatsApp's end-to-end encryption is maintained. The desktop application is just a client for WhatsApp Web, which uses the same encryption as the mobile app.
+
+### What data is stored locally?
+
+Local storage includes:
+- Account configurations
+- Session data (cookies, cache, local storage)
+- Translation cache
+- Application logs
+- Window state and preferences
+
+### How do I completely remove all data?
+
+To remove all data:
+1. Delete all accounts from the application
+2. Choose "Delete session data" for each
+3. Uninstall the application
+4. Manually delete the data directory:
+   - Windows: `%APPDATA%/whatsapp-desktop/`
+   - macOS: `~/Library/Application Support/whatsapp-desktop/`
+   - Linux: `~/.config/whatsapp-desktop/`
 
 ---
 
-**最后更新**: 2024-01-15  
-**版本**: 1.0.0
+## Technical Questions
 
-如果这个 FAQ 对您有帮助，请给我们 ⭐ Star！
+### What technology is this built with?
+
+The application is built with:
+- **Electron**: Cross-platform desktop framework
+- **BrowserView**: For embedding WhatsApp Web
+- **Node.js**: Backend logic
+- **HTML/CSS/JavaScript**: UI components
+
+### What's the difference between BrowserWindow and BrowserView?
+
+- **BrowserWindow**: A complete window with its own frame
+- **BrowserView**: An embedded view within a window
+
+The new architecture uses one BrowserWindow (main window) with multiple BrowserViews (one per account).
+
+### How is session isolation achieved?
+
+Session isolation uses Electron's partition API:
+- Each account gets a unique partition: `persist:account_{id}`
+- Partitions have separate storage for cookies, localStorage, IndexedDB, etc.
+- Network requests are isolated per partition
+
+### Can I access the DevTools?
+
+Yes, you can open DevTools:
+- **Main window**: `Ctrl+Shift+I` or `F12`
+- **Account view**: Right-click in account → **Inspect Element**
+
+### Where are logs stored?
+
+Logs are stored in:
+- Windows: `%APPDATA%/whatsapp-desktop/logs/`
+- macOS: `~/Library/Application Support/whatsapp-desktop/logs/`
+- Linux: `~/.config/whatsapp-desktop/logs/`
+
+### Can I run multiple instances of the application?
+
+No, only one instance can run at a time to prevent conflicts. If you try to launch a second instance, it will focus the existing window.
+
+### What ports does the application use?
+
+The application doesn't listen on any ports. It only makes outbound connections to:
+- WhatsApp Web servers (HTTPS)
+- Translation API servers (HTTPS)
+- Proxy servers (if configured)
+
+### Can I customize the application?
+
+Limited customization is available:
+- Sidebar width
+- Account order
+- Keyboard shortcuts (in settings)
+- Theme (if supported)
+
+Advanced customization requires modifying the source code.
+
+### Is the source code available?
+
+Check the project repository for source code availability and contribution guidelines.
+
+### How do I report a bug?
+
+To report a bug:
+1. Check if it's already reported in the issue tracker
+2. Gather information:
+   - Application version
+   - Operating system
+   - Steps to reproduce
+   - Error messages
+   - Log files
+3. Submit a detailed bug report
+
+### How do I request a feature?
+
+To request a feature:
+1. Check if it's already requested
+2. Describe the feature clearly
+3. Explain the use case
+4. Submit a feature request in the issue tracker
+
+---
+
+## Still Have Questions?
+
+If your question isn't answered here:
+
+1. **Check the documentation**:
+   - [User Guide](SINGLE_WINDOW_USER_GUIDE.md)
+   - [Migration Guide](MIGRATION_GUIDE.md)
+   - [Account Management Reference](ACCOUNT_MANAGEMENT_QUICK_REFERENCE.md)
+
+2. **Search the community**:
+   - [Community Forum](https://community.example.com)
+   - [GitHub Issues](https://github.com/your-repo/issues)
+
+3. **Contact support**:
+   - Email: support@example.com
+   - Include: version, OS, detailed description, logs
+
+---
+
+*Last updated: 2024-01-15*

@@ -41,6 +41,20 @@ describe('AccountConfigManager', () => {
       expect(result.account).toBeDefined();
       expect(result.account.name).toBe('Test Account');
       expect(result.account.id).toBeDefined();
+      expect(result.account.order).toBe(0);
+      expect(result.account.sessionDir).toBeDefined();
+      expect(result.account.note).toBe('');
+      expect(result.account.autoStart).toBe(false);
+    });
+
+    test('should auto-assign order for new accounts', async () => {
+      const result1 = await manager.createAccount({ name: 'Account 1' });
+      const result2 = await manager.createAccount({ name: 'Account 2' });
+      const result3 = await manager.createAccount({ name: 'Account 3' });
+      
+      expect(result1.account.order).toBe(0);
+      expect(result2.account.order).toBe(1);
+      expect(result3.account.order).toBe(2);
     });
 
     test('should create account with custom configuration', async () => {
@@ -95,6 +109,19 @@ describe('AccountConfigManager', () => {
       const accounts = await manager.loadAccounts();
       
       expect(accounts).toEqual([]);
+    });
+
+    test('should load accounts sorted by order', async () => {
+      await manager.createAccount({ name: 'Account 1', order: 2 });
+      await manager.createAccount({ name: 'Account 2', order: 0 });
+      await manager.createAccount({ name: 'Account 3', order: 1 });
+      
+      const accounts = await manager.loadAccounts({ sorted: true });
+      
+      expect(accounts.length).toBe(3);
+      expect(accounts[0].name).toBe('Account 2');
+      expect(accounts[1].name).toBe('Account 3');
+      expect(accounts[2].name).toBe('Account 1');
     });
   });
 
@@ -257,6 +284,92 @@ describe('AccountConfigManager', () => {
       expect(ids).toContain(result1.account.id);
       expect(ids).toContain(result2.account.id);
       expect(ids.length).toBe(2);
+    });
+  });
+
+  describe('reorderAccounts', () => {
+    test('should reorder accounts correctly', async () => {
+      const result1 = await manager.createAccount({ name: 'Account 1' });
+      const result2 = await manager.createAccount({ name: 'Account 2' });
+      const result3 = await manager.createAccount({ name: 'Account 3' });
+      
+      const newOrder = [result3.account.id, result1.account.id, result2.account.id];
+      const reorderResult = await manager.reorderAccounts(newOrder);
+      
+      expect(reorderResult.success).toBe(true);
+      
+      const accounts = await manager.loadAccounts({ sorted: true });
+      expect(accounts[0].id).toBe(result3.account.id);
+      expect(accounts[1].id).toBe(result1.account.id);
+      expect(accounts[2].id).toBe(result2.account.id);
+    });
+
+    test('should fail to reorder with non-existent account', async () => {
+      const result1 = await manager.createAccount({ name: 'Account 1' });
+      
+      const newOrder = [result1.account.id, 'non-existent-id'];
+      const reorderResult = await manager.reorderAccounts(newOrder);
+      
+      expect(reorderResult.success).toBe(false);
+      expect(reorderResult.errors).toBeDefined();
+    });
+  });
+
+  describe('getAccountsSorted', () => {
+    test('should return accounts sorted by order', async () => {
+      await manager.createAccount({ name: 'Account C', order: 2 });
+      await manager.createAccount({ name: 'Account A', order: 0 });
+      await manager.createAccount({ name: 'Account B', order: 1 });
+      
+      const accounts = await manager.getAccountsSorted();
+      
+      expect(accounts[0].name).toBe('Account A');
+      expect(accounts[1].name).toBe('Account B');
+      expect(accounts[2].name).toBe('Account C');
+    });
+  });
+
+  describe('backward compatibility', () => {
+    test('should handle accounts without order field', async () => {
+      // Manually create an account without order field (simulating old config)
+      const oldAccount = new AccountConfig({ name: 'Old Account' });
+      delete oldAccount.order;
+      
+      manager.accountsCache.set(oldAccount.id, oldAccount);
+      manager._saveCacheToStore();
+      
+      // Reload to trigger backward compatibility
+      manager._loadAccountsToCache();
+      
+      const account = await manager.getAccount(oldAccount.id);
+      expect(account.order).toBeDefined();
+      expect(typeof account.order).toBe('number');
+    });
+
+    test('should handle accounts without sessionDir field', async () => {
+      // Manually create an account without sessionDir field (simulating old config)
+      const oldAccount = new AccountConfig({ name: 'Old Account' });
+      delete oldAccount.sessionDir;
+      
+      manager.accountsCache.set(oldAccount.id, oldAccount);
+      manager._saveCacheToStore();
+      
+      // Reload to trigger backward compatibility
+      manager._loadAccountsToCache();
+      
+      const account = await manager.getAccount(oldAccount.id);
+      expect(account.sessionDir).toBeDefined();
+      expect(account.sessionDir).toContain('session-data/account-');
+    });
+
+    test('should ignore deprecated window field', async () => {
+      const accountWithWindow = await manager.createAccount({
+        name: 'Account with Window',
+        window: { x: 100, y: 100, width: 800, height: 600 }
+      });
+      
+      expect(accountWithWindow.success).toBe(true);
+      expect(accountWithWindow.account.window).toBeUndefined();
     });
   });
 });

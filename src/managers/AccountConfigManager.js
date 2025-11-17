@@ -9,6 +9,12 @@ const Store = require('electron-store');
 const AccountConfig = require('../models/AccountConfig');
 const path = require('path');
 const fs = require('fs').promises;
+const { 
+  validateAccountConfig, 
+  checkDuplicateAccountName,
+  sanitizeAccountName,
+  sanitizeAccountNote
+} = require('../utils/ValidationHelper');
 
 /**
  * AccountConfigManager 类
@@ -54,13 +60,33 @@ class AccountConfigManager {
     const accountsData = this.store.get('accounts', {});
     this.accountsCache.clear();
     
+    let maxOrder = -1;
+    
     for (const [id, data] of Object.entries(accountsData)) {
       try {
+        // 向后兼容：如果旧配置没有 order 字段，自动分配
+        if (data.order === undefined) {
+          data.order = maxOrder + 1;
+          maxOrder++;
+        } else {
+          maxOrder = Math.max(maxOrder, data.order);
+        }
+        
+        // 向后兼容：如果旧配置没有 sessionDir，使用默认路径
+        if (!data.sessionDir) {
+          data.sessionDir = `session-data/account-${id}`;
+        }
+        
         const account = AccountConfig.fromJSON(data);
         this.accountsCache.set(id, account);
       } catch (error) {
         console.error(`Failed to load account ${id}:`, error);
       }
+    }
+    
+    // 如果进行了向后兼容转换，保存更新后的配置
+    if (maxOrder >= 0) {
+      this._saveCacheToStore();
     }
   }
 
@@ -78,10 +104,18 @@ class AccountConfigManager {
 
   /**
    * 加载所有账号配置
+   * @param {Object} [options] - 加载选项
+   * @param {boolean} [options.sorted] - 是否按 order 字段排序
    * @returns {Promise<AccountConfig[]>}
    */
-  async loadAccounts() {
-    return Array.from(this.accountsCache.values());
+  async loadAccounts(options = {}) {
+    const accounts = Array.from(this.accountsCache.values());
+    
+    if (options.sorted) {
+      return accounts.sort((a, b) => a.order - b.order);
+    }
+    
+    return accounts;
   }
 
   /**
@@ -132,7 +166,41 @@ class AccountConfigManager {
    */
   async createAccount(config = {}) {
     try {
+      // Sanitize input
+      if (config.name) {
+        config.name = sanitizeAccountName(config.name);
+      }
+      if (config.note) {
+        config.note = sanitizeAccountNote(config.note);
+      }
+
+      // Check for duplicate account names
+      const existingAccounts = await this.loadAccounts();
+      const duplicateCheck = checkDuplicateAccountName(config.name, existingAccounts);
+      if (duplicateCheck.isDuplicate) {
+        return {
+          success: false,
+          errors: [`An account with the name "${config.name}" already exists`]
+        };
+      }
+
+      // 如果没有指定 order，自动分配为最大值 + 1
+      if (config.order === undefined) {
+        const maxOrder = this._getMaxOrder();
+        config.order = maxOrder + 1;
+      }
+      
       const account = new AccountConfig(config);
+
+      // Additional validation using ValidationHelper
+      const validation = validateAccountConfig(account.toJSON());
+      if (!validation.valid) {
+        return {
+          success: false,
+          errors: validation.errors
+        };
+      }
+
       const result = await this.saveAccount(account);
       
       if (result.success) {
@@ -169,6 +237,24 @@ class AccountConfigManager {
     }
 
     try {
+      // Sanitize input
+      if (updates.name) {
+        updates.name = sanitizeAccountName(updates.name);
+        
+        // Check for duplicate account names (excluding current account)
+        const existingAccounts = await this.loadAccounts();
+        const duplicateCheck = checkDuplicateAccountName(updates.name, existingAccounts, accountId);
+        if (duplicateCheck.isDuplicate) {
+          return {
+            success: false,
+            errors: [`An account with the name "${updates.name}" already exists`]
+          };
+        }
+      }
+      if (updates.note !== undefined) {
+        updates.note = sanitizeAccountNote(updates.note);
+      }
+
       // 应用更新，确保日期字段被正确转换
       const processedUpdates = { ...updates };
       if (processedUpdates.createdAt && !(processedUpdates.createdAt instanceof Date)) {
@@ -179,6 +265,15 @@ class AccountConfigManager {
       }
       
       Object.assign(account, processedUpdates);
+
+      // Additional validation using ValidationHelper
+      const validation = validateAccountConfig(account.toJSON());
+      if (!validation.valid) {
+        return {
+          success: false,
+          errors: validation.errors
+        };
+      }
       
       // 保存更新后的配置
       const result = await this.saveAccount(account);
@@ -368,6 +463,70 @@ class AccountConfigManager {
    */
   getConfigPath() {
     return this.store.path;
+  }
+
+  /**
+   * 获取当前最大的 order 值
+   * @private
+   * @returns {number}
+   */
+  _getMaxOrder() {
+    let maxOrder = -1;
+    for (const account of this.accountsCache.values()) {
+      if (account.order > maxOrder) {
+        maxOrder = account.order;
+      }
+    }
+    return maxOrder;
+  }
+
+  /**
+   * 重新排序账号
+   * @param {string[]} accountIds - 按新顺序排列的账号 ID 数组
+   * @returns {Promise<{success: boolean, errors?: string[]}>}
+   */
+  async reorderAccounts(accountIds) {
+    try {
+      const errors = [];
+      
+      // 验证所有账号 ID 是否存在
+      for (const id of accountIds) {
+        if (!this.accountExists(id)) {
+          errors.push(`Account ${id} not found`);
+        }
+      }
+      
+      if (errors.length > 0) {
+        return { success: false, errors };
+      }
+      
+      // 更新每个账号的 order 字段
+      accountIds.forEach((id, index) => {
+        const account = this.accountsCache.get(id);
+        if (account) {
+          account.order = index;
+        }
+      });
+      
+      // 保存更新
+      this._saveCacheToStore();
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to reorder accounts:', error);
+      return {
+        success: false,
+        errors: [`Failed to reorder accounts: ${error.message}`]
+      };
+    }
+  }
+
+  /**
+   * 获取按顺序排列的账号列表
+   * @returns {Promise<AccountConfig[]>}
+   */
+  async getAccountsSorted() {
+    return this.loadAccounts({ sorted: true });
   }
 }
 

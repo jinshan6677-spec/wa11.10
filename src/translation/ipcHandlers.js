@@ -20,28 +20,49 @@ async function registerIPCHandlers() {
     }
   }
   
-  // 翻译请求
+  // 翻译请求 (with account routing)
   ipcMain.handle('translation:translate', async (event, request) => {
     try {
-      const { text, sourceLang, targetLang, engineName, options } = request;
+      const { accountId, text, sourceLang, targetLang, engineName, options } = request;
+      
+      // Validate accountId
+      if (!accountId) {
+        throw new Error('Account ID is required for translation requests');
+      }
+      
+      // Get account-specific translation config
+      const accountConfig = translationService.getConfig(accountId);
+      
+      // Merge account config with request options
+      const mergedOptions = {
+        ...options,
+        accountId, // Include accountId in options for cache key generation
+        ...accountConfig
+      };
+      
+      // Use account-specific engine if not specified
+      const effectiveEngine = engineName || accountConfig.engine || 'google';
+      const effectiveTargetLang = targetLang || accountConfig.targetLanguage || 'zh-CN';
       
       const result = await translationService.translate(
         text,
         sourceLang || 'auto',
-        targetLang || 'zh-CN',
-        engineName || 'google',
-        options || {}
+        effectiveTargetLang,
+        effectiveEngine,
+        mergedOptions
       );
 
       return {
         success: true,
-        data: result
+        data: result,
+        accountId
       };
     } catch (error) {
-      console.error('[IPC] Translation error:', error);
+      console.error(`[IPC] Translation error for account ${request.accountId}:`, error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        accountId: request.accountId
       };
     }
   });
@@ -63,35 +84,52 @@ async function registerIPCHandlers() {
     }
   });
 
-  // 获取配置
+  // 获取配置 (account-specific)
   ipcMain.handle('translation:getConfig', async (event, accountId) => {
     try {
-      const config = translationService.getConfig(accountId || 'default');
+      // Require accountId for proper routing
+      if (!accountId) {
+        throw new Error('Account ID is required to get translation config');
+      }
+      
+      const config = translationService.getConfig(accountId);
       return {
         success: true,
-        data: config
+        data: config,
+        accountId
       };
     } catch (error) {
-      console.error('[IPC] Get config error:', error);
+      console.error(`[IPC] Get config error for account ${accountId}:`, error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        accountId
       };
     }
   });
 
-  // 保存配置
+  // 保存配置 (account-specific)
   ipcMain.handle('translation:saveConfig', async (event, accountId, config) => {
     try {
-      translationService.saveConfig(accountId || 'default', config);
+      // Require accountId for proper routing
+      if (!accountId) {
+        throw new Error('Account ID is required to save translation config');
+      }
+      
+      translationService.saveConfig(accountId, config);
+      
+      console.log(`[IPC] Translation config saved for account ${accountId}`);
+      
       return {
-        success: true
+        success: true,
+        accountId
       };
     } catch (error) {
-      console.error('[IPC] Save config error:', error);
+      console.error(`[IPC] Save config error for account ${accountId}:`, error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        accountId
       };
     }
   });
@@ -113,18 +151,31 @@ async function registerIPCHandlers() {
     }
   });
 
-  // 清除缓存
-  ipcMain.handle('translation:clearCache', async (event) => {
+  // 清除缓存 (全局或按账号)
+  ipcMain.handle('translation:clearCache', async (event, accountId = null) => {
     try {
-      await translationService.cacheManager.clear();
-      return {
-        success: true
-      };
+      if (accountId) {
+        // Clear cache for specific account
+        await translationService.cacheManager.clearByAccount(accountId);
+        console.log(`[IPC] Translation cache cleared for account ${accountId}`);
+        return {
+          success: true,
+          accountId
+        };
+      } else {
+        // Clear all cache
+        await translationService.cacheManager.clear();
+        console.log('[IPC] All translation cache cleared');
+        return {
+          success: true
+        };
+      }
     } catch (error) {
-      console.error('[IPC] Clear cache error:', error);
+      console.error(`[IPC] Clear cache error${accountId ? ` for account ${accountId}` : ''}:`, error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        accountId
       };
     }
   });
@@ -237,6 +288,31 @@ async function registerIPCHandlers() {
     }
   });
 
+  // 获取账号的翻译统计
+  ipcMain.handle('translation:getAccountStats', async (event, accountId) => {
+    try {
+      if (!accountId) {
+        throw new Error('Account ID is required to get translation stats');
+      }
+      
+      // Get overall stats (could be extended to track per-account stats)
+      const stats = translationService.getStats();
+      
+      return {
+        success: true,
+        data: stats,
+        accountId
+      };
+    } catch (error) {
+      console.error(`[IPC] Get account stats error for account ${accountId}:`, error);
+      return {
+        success: false,
+        error: error.message,
+        accountId
+      };
+    }
+  });
+
   console.log('[IPC] Translation handlers registered');
 }
 
@@ -250,10 +326,13 @@ function unregisterIPCHandlers() {
   ipcMain.removeHandler('translation:saveConfig');
   ipcMain.removeHandler('translation:getStats');
   ipcMain.removeHandler('translation:clearCache');
+  ipcMain.removeHandler('translation:saveEngineConfig');
+  ipcMain.removeHandler('translation:getEngineConfig');
   ipcMain.removeHandler('translation:clearHistory');
   ipcMain.removeHandler('translation:clearUserData');
   ipcMain.removeHandler('translation:clearAllData');
   ipcMain.removeHandler('translation:getPrivacyReport');
+  ipcMain.removeHandler('translation:getAccountStats');
   
   console.log('[IPC] Translation handlers unregistered');
 }

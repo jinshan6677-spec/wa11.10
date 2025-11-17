@@ -1,46 +1,90 @@
 /**
- * WhatsApp Desktop - Electron 主进程（多实例架构）
+ * WhatsApp Desktop - Electron 主进程（单窗口架构）
  * 
- * 这个应用支持同时运行多个 WhatsApp 账号，每个账号在独立的浏览器实例中运行
- * 提供完全的进程级隔离、存储隔离和网络隔离
+ * 这个应用支持在单个窗口中管理多个 WhatsApp 账号
+ * 使用 BrowserView 提供完全的会话隔离、存储隔离和网络隔离
  */
 
 const { app } = require('electron');
 const config = require('./config');
 const path = require('path');
 
-// 导入管理器
+// 导入单窗口架构组件
+const MainWindow = require('./single-window/MainWindow');
+const ViewManager = require('./single-window/ViewManager');
 const AccountConfigManager = require('./managers/AccountConfigManager');
-const InstanceManager = require('./managers/InstanceManager');
-const MainApplicationWindow = require('./container/MainApplicationWindow');
-const TranslationIntegration = require('./managers/TranslationIntegration');
-const ErrorHandler = require('./managers/ErrorHandler');
 const SessionManager = require('./managers/SessionManager');
+const TranslationIntegration = require('./managers/TranslationIntegration');
 const NotificationManager = require('./managers/NotificationManager');
-const ResourceManager = require('./managers/ResourceManager');
 const TrayManager = require('./managers/TrayManager');
 
 // 导入 IPC 处理器
-const { registerIPCHandlers: registerContainerIPCHandlers, unregisterIPCHandlers: unregisterContainerIPCHandlers } = require('./container/ipcHandlers');
+const { registerIPCHandlers: registerSingleWindowIPCHandlers, unregisterIPCHandlers: unregisterSingleWindowIPCHandlers } = require('./single-window/ipcHandlers');
 const { registerIPCHandlers: registerTranslationIPCHandlers, unregisterIPCHandlers: unregisterTranslationIPCHandlers } = require('./translation/ipcHandlers');
 
-// 导入迁移和首次运行向导
-const { checkAndMigrate } = require('./managers/autoMigration');
-const FirstRunWizardIntegration = require('./managers/FirstRunWizardIntegration');
+// 导入迁移管理器
+const MigrationManager = require('./single-window/migration/MigrationManager');
+const MigrationDialog = require('./single-window/migration/MigrationDialog');
+
+// 导入错误处理工具
+const { getErrorLogger, ErrorCategory } = require('./utils/ErrorLogger');
+const { setupGlobalErrorHandlers } = require('./utils/ErrorHandler');
 
 // 全局管理器实例
+let mainWindow = null;
+let viewManager = null;
 let accountConfigManager = null;
-let instanceManager = null;
-let mainApplicationWindow = null;
-let translationIntegration = null;
-let errorHandler = null;
 let sessionManager = null;
+let translationIntegration = null;
 let notificationManager = null;
-let resourceManager = null;
 let trayManager = null;
-let firstRunWizard = null;
+let migrationManager = null;
+let errorLogger = null;
 
 
+
+/**
+ * 确保所有账号都启用了翻译功能
+ */
+async function ensureTranslationEnabled(accountManager) {
+  try {
+    const accounts = await accountManager.loadAccounts();
+    let updatedCount = 0;
+
+    for (const account of accounts) {
+      let needsUpdate = false;
+
+      // 如果账号没有翻译配置或翻译未启用，则启用它
+      if (!account.translation) {
+        account.translation = {
+          enabled: true,
+          targetLanguage: 'zh-CN',
+          engine: 'google',
+          apiKey: '',
+          autoTranslate: false,
+          translateInput: false,
+          friendSettings: {}
+        };
+        needsUpdate = true;
+      } else if (!account.translation.enabled) {
+        account.translation.enabled = true;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        await accountManager.saveAccount(account);
+        updatedCount++;
+        log('info', `已为账号 ${account.name} 启用翻译功能`);
+      }
+    }
+
+    if (updatedCount > 0) {
+      log('info', `已为 ${updatedCount} 个账号启用翻译功能`);
+    }
+  } catch (error) {
+    log('error', '检查翻译配置时出错:', error);
+  }
+}
 
 /**
  * 日志记录函数
@@ -65,11 +109,30 @@ async function initializeManagers() {
   log('info', '初始化管理器...');
 
   try {
+    // 0. 初始化错误日志记录器
+    errorLogger = getErrorLogger({
+      logDir: path.join(app.getPath('userData'), 'logs'),
+      logFileName: 'error.log',
+      maxLogSize: 10 * 1024 * 1024, // 10MB
+      maxLogFiles: 5,
+      consoleOutput: true
+    });
+    await errorLogger.initialize();
+    log('info', '错误日志记录器初始化完成');
+
+    // 设置全局错误处理器
+    setupGlobalErrorHandlers();
+    log('info', '全局错误处理器已设置');
+
     // 1. 初始化账号配置管理器
     accountConfigManager = new AccountConfigManager({
       cwd: app.getPath('userData')
     });
     log('info', '账号配置管理器初始化完成');
+
+    // 1.1 确保所有账号都启用了翻译功能
+    await ensureTranslationEnabled(accountConfigManager);
+    log('info', '翻译配置检查完成');
 
     // 2. 初始化会话管理器
     sessionManager = new SessionManager({
@@ -81,70 +144,43 @@ async function initializeManagers() {
     notificationManager = new NotificationManager();
     log('info', '通知管理器初始化完成');
 
-    // 4. 初始化资源管理器
-    resourceManager = new ResourceManager({
-      limits: {
-        maxInstances: config.maxConcurrentInstances || 30,
-        maxMemoryUsagePercent: 90,
-        maxCpuUsagePercent: 90,
-        warningMemoryUsagePercent: 75,
-        warningCpuUsagePercent: 75
-      },
-      onWarning: (type, resources) => {
-        log('warn', `Resource warning: ${type} usage at ${type === 'memory' ? resources.memoryUsagePercent : resources.cpuUsage}%`);
-      },
-      onLimit: (type, resources) => {
-        log('error', `Resource limit reached: ${type} usage at ${type === 'memory' ? resources.memoryUsagePercent : resources.cpuUsage}%`);
-      }
-    });
-    log('info', '资源管理器初始化完成');
-
-    // 5. 初始化翻译集成
-    translationIntegration = new TranslationIntegration(null); // instanceManager 将在后面设置
+    // 4. 初始化翻译集成
+    translationIntegration = new TranslationIntegration(null);
     await translationIntegration.initialize();
     log('info', '翻译集成初始化完成');
 
-    // 6. 初始化实例管理器
-    instanceManager = new InstanceManager({
-      userDataPath: app.getPath('userData'),
-      maxInstances: config.maxConcurrentInstances || 30,
-      translationIntegration: translationIntegration,
-      sessionManager: sessionManager,
-      notificationManager: notificationManager,
-      resourceManager: resourceManager
+    // 5. 初始化主窗口
+    mainWindow = new MainWindow({
+      width: 1400,
+      height: 900,
+      minWidth: 1000,
+      minHeight: 600,
+      title: 'WhatsApp Desktop',
+      preloadPath: path.join(__dirname, 'single-window', 'renderer', 'preload-main.js'),
+      htmlPath: path.join(__dirname, 'single-window', 'renderer', 'app.html')
     });
-    
-    // 设置 translationIntegration 的 instanceManager 引用
-    translationIntegration.instanceManager = instanceManager;
-    
-    log('info', '实例管理器初始化完成');
+    mainWindow.initialize();
+    log('info', '主窗口初始化完成');
 
-    // 7. 初始化错误处理器
-    errorHandler = new ErrorHandler(instanceManager, {
-      maxCrashCount: 3,
-      crashResetTime: 300000, // 5 分钟
-      restartDelay: 5000, // 5 秒
-      logPath: path.join(app.getPath('userData'), 'logs', 'errors.log')
+    // 设置窗口关闭事件处理器
+    setupMainWindowCloseHandler();
+    log('info', '窗口关闭处理器已设置');
+
+    // 6. 初始化 ViewManager
+    viewManager = new ViewManager(mainWindow, sessionManager, {
+      defaultSidebarWidth: 280,
+      translationIntegration: translationIntegration
     });
-    
-    // 设置 instanceManager 的 errorHandler 引用
-    instanceManager.errorHandler = errorHandler;
-    
-    log('info', '错误处理器初始化完成');
+    log('info', 'ViewManager 初始化完成');
 
-    // 8. 初始化主应用窗口
-    mainApplicationWindow = new MainApplicationWindow();
-    mainApplicationWindow.initialize();
-    log('info', '主应用窗口初始化完成');
+    // 7. 设置通知管理器的主窗口引用
+    notificationManager.setMainWindow(mainWindow);
 
-    // 9. 设置通知管理器的主窗口引用
-    notificationManager.setMainWindow(mainApplicationWindow);
-
-    // 10. 初始化系统托盘（如果启用）
+    // 8. 初始化系统托盘（如果启用）
     if (config.trayConfig && config.trayConfig.enabled) {
       try {
         trayManager = new TrayManager();
-        trayManager.initialize(mainApplicationWindow.getWindow(), config.trayConfig);
+        trayManager.initialize(mainWindow.getWindow(), config.trayConfig);
         
         // 设置托盘管理器引用
         notificationManager.setTrayManager(trayManager);
@@ -154,14 +190,6 @@ async function initializeManagers() {
         log('error', '系统托盘初始化失败:', error);
       }
     }
-
-    // 11. 启动资源监控
-    resourceManager.startMonitoring(10000); // 每 10 秒检查一次
-    log('info', '资源监控已启动');
-
-    // 12. 启动实例监控
-    instanceManager.startGlobalMonitoring();
-    log('info', '实例监控已启动');
 
     log('info', '所有管理器初始化完成');
   } catch (error) {
@@ -177,13 +205,11 @@ async function registerAllIPCHandlers() {
   log('info', '注册 IPC 处理器...');
 
   try {
-    // 注册容器（账号管理）IPC 处理器
-    registerContainerIPCHandlers(accountConfigManager, instanceManager, mainApplicationWindow);
-    log('info', '容器 IPC 处理器注册完成');
+    // 注册单窗口架构 IPC 处理器
+    registerSingleWindowIPCHandlers(accountConfigManager, viewManager, mainWindow, translationIntegration);
+    log('info', '单窗口 IPC 处理器注册完成');
 
-    // 注册翻译 IPC 处理器（如果需要）
-    // 注意：翻译功能现在通过 TranslationIntegration 集成到每个实例中
-    // 但保留原有的 IPC 处理器以支持全局翻译配置
+    // 注册翻译 IPC 处理器
     await registerTranslationIPCHandlers();
     log('info', '翻译 IPC 处理器注册完成');
 
@@ -195,9 +221,9 @@ async function registerAllIPCHandlers() {
 }
 
 /**
- * 自动启动配置的账号实例
+ * 自动启动配置的账号
  */
-async function autoStartInstances() {
+async function autoStartAccounts() {
   log('info', '检查自动启动配置...');
 
   try {
@@ -214,29 +240,36 @@ async function autoStartInstances() {
 
     log('info', `找到 ${autoStartAccounts.length} 个自动启动账号`);
 
-    // 依次启动账号（避免同时启动太多实例）
-    for (const account of autoStartAccounts) {
+    // 启动第一个自动启动账号（在单窗口架构中）
+    if (autoStartAccounts.length > 0) {
+      const firstAccount = autoStartAccounts[0];
+      
       try {
-        log('info', `自动启动账号: ${account.name} (${account.id})`);
+        log('info', `自动启动账号: ${firstAccount.name} (${firstAccount.id})`);
         
-        const result = await instanceManager.createInstance(account);
+        // 使用 ViewManager 切换到该账号（会自动创建视图）
+        const result = await viewManager.switchView(firstAccount.id, {
+          createIfMissing: true,
+          viewConfig: {
+            url: 'https://web.whatsapp.com',
+            proxy: firstAccount.proxy,
+            translation: firstAccount.translation
+          }
+        });
         
         if (result.success) {
-          log('info', `账号 ${account.name} 启动成功`);
+          log('info', `账号 ${firstAccount.name} 启动成功`);
           
-          // 更新主窗口状态
-          if (mainApplicationWindow) {
-            mainApplicationWindow.updateAccountStatus(account.id, { status: 'running' });
-          }
+          // 更新最后活跃时间
+          await accountConfigManager.updateAccount(firstAccount.id, {
+            lastActiveAt: new Date()
+          });
         } else {
-          log('error', `账号 ${account.name} 启动失败: ${result.error}`);
+          log('error', `账号 ${firstAccount.name} 启动失败: ${result.error}`);
         }
         
-        // 延迟一下，避免同时启动太多实例
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
       } catch (error) {
-        log('error', `自动启动账号 ${account.name} 时出错:`, error);
+        log('error', `自动启动账号 ${firstAccount.name} 时出错:`, error);
       }
     }
 
@@ -247,128 +280,168 @@ async function autoStartInstances() {
 }
 
 /**
+ * 保存应用状态
+ * 保存所有账号状态和应用配置
+ */
+async function saveApplicationState() {
+  log('info', '保存应用状态...');
+
+  try {
+    // 1. 保存活跃账号 ID（由 ViewManager 自动保存）
+    if (viewManager) {
+      const activeAccountId = viewManager.getActiveAccountId();
+      if (activeAccountId) {
+        log('info', `当前活跃账号: ${activeAccountId}`);
+      }
+    }
+
+    // 2. 保存所有账号的最后活跃时间
+    if (accountConfigManager && viewManager) {
+      const accounts = await accountConfigManager.loadAccounts();
+      let updatedCount = 0;
+
+      for (const account of accounts) {
+        // 如果账号有活跃的视图，更新最后活跃时间
+        if (viewManager.hasView(account.id)) {
+          await accountConfigManager.updateAccount(account.id, {
+            lastActiveAt: new Date()
+          });
+          updatedCount++;
+        }
+      }
+
+      log('info', `已更新 ${updatedCount} 个账号的活跃时间`);
+    }
+
+    // 3. 保存窗口状态（由 MainWindow 自动保存）
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const bounds = mainWindow.getBounds();
+      if (bounds) {
+        log('info', `窗口状态已保存: ${bounds.width}x${bounds.height}`);
+      }
+    }
+
+    // 4. 保存侧边栏宽度（由 MainWindow 自动保存）
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const sidebarWidth = mainWindow.getSidebarWidth();
+      log('info', `侧边栏宽度已保存: ${sidebarWidth}px`);
+    }
+
+    log('info', '应用状态保存完成');
+  } catch (error) {
+    log('error', '保存应用状态时出错:', error);
+    throw error;
+  }
+}
+
+/**
  * 清理资源
+ * 执行优雅关闭，清理所有资源
  */
 async function cleanup() {
   log('info', '开始清理资源...');
 
-  // 1. 停止资源监控
   try {
-    if (resourceManager) {
-      resourceManager.stopMonitoring();
-      log('info', '资源监控已停止');
-    }
-  } catch (error) {
-    log('error', '停止资源监控时出错:', error);
-  }
+    // 1. 保存应用状态
+    await saveApplicationState();
 
-  // 2. 停止实例监控
-  try {
-    if (instanceManager) {
-      instanceManager.stopGlobalMonitoring();
-      log('info', '实例监控已停止');
-    }
-  } catch (error) {
-    log('error', '停止实例监控时出错:', error);
-  }
+    // 2. 停止所有监控
+    try {
+      if (viewManager) {
+        // 停止连接监控
+        const stopResult = viewManager.stopAllConnectionMonitoring();
+        log('info', `连接监控已停止: ${stopResult.stopped} 个账号`);
 
-  // 3. 关闭所有运行中的实例（保存状态）
-  try {
-    if (instanceManager) {
-      log('info', '关闭所有运行中的实例...');
-      const result = await instanceManager.destroyAllInstances();
-      log('info', `实例关闭完成: ${result.destroyed} 个成功, ${result.failed} 个失败`);
+        // 停止登录状态监控
+        const stopLoginResult = viewManager.stopAllLoginStatusMonitoring();
+        log('info', `登录状态监控已停止: ${stopLoginResult.stopped} 个账号`);
+      }
+    } catch (error) {
+      log('error', '停止监控时出错:', error);
     }
-  } catch (error) {
-    log('error', '关闭实例时出错:', error);
-  }
 
-  // 4. 保存所有账号配置
-  try {
-    if (accountConfigManager && instanceManager) {
-      log('info', '保存账号配置...');
-      const accounts = await accountConfigManager.loadAccounts();
-      
-      for (const account of accounts) {
-        const instance = instanceManager.instances.get(account.id);
-        if (instance) {
-          // 保存窗口状态
-          const windowState = instanceManager.getWindowState(account.id);
-          if (windowState.success) {
-            account.window = windowState.bounds;
-          }
-          
-          // 保存最后活跃时间
-          account.lastActiveAt = new Date().toISOString();
-          
-          await accountConfigManager.saveAccount(account);
+    // 3. 优雅关闭所有 BrowserView
+    try {
+      if (viewManager) {
+        log('info', '开始优雅关闭所有 BrowserView...');
+
+        // 获取所有视图
+        const allViews = viewManager.getAllViews();
+        log('info', `准备关闭 ${allViews.length} 个 BrowserView`);
+
+        // 销毁所有视图
+        const result = await viewManager.destroyAllViews();
+        log('info', `BrowserView 关闭完成: ${result.destroyed} 个成功, ${result.failed} 个失败`);
+
+        if (result.failed > 0) {
+          log('warn', `有 ${result.failed} 个 BrowserView 关闭失败`);
         }
       }
-      
-      log('info', '账号配置已保存');
+    } catch (error) {
+      log('error', '关闭 BrowserView 时出错:', error);
     }
-  } catch (error) {
-    log('error', '保存账号配置时出错:', error);
-  }
 
-  // 5. 销毁系统托盘
-  try {
-    if (trayManager) {
-      trayManager.destroy();
-      trayManager = null;
-      log('info', '系统托盘已销毁');
+    // 4. 销毁系统托盘
+    try {
+      if (trayManager) {
+        trayManager.destroy();
+        trayManager = null;
+        log('info', '系统托盘已销毁');
+      }
+    } catch (error) {
+      log('error', '销毁系统托盘时出错:', error);
     }
-  } catch (error) {
-    log('error', '销毁系统托盘时出错:', error);
-  }
 
-  // 6. 注销 IPC 处理器
-  try {
-    unregisterContainerIPCHandlers();
-    log('info', '容器 IPC 处理器已注销');
-  } catch (error) {
-    log('error', '注销容器 IPC 处理器时出错:', error);
-  }
-
-  try {
-    unregisterTranslationIPCHandlers();
-    log('info', '翻译 IPC 处理器已注销');
-  } catch (error) {
-    log('error', '注销翻译 IPC 处理器时出错:', error);
-  }
-
-  // 7. 清理翻译集成
-  try {
-    if (translationIntegration) {
-      translationIntegration.cleanup();
-      log('info', '翻译集成已清理');
+    // 5. 注销 IPC 处理器
+    try {
+      unregisterSingleWindowIPCHandlers();
+      log('info', '单窗口 IPC 处理器已注销');
+    } catch (error) {
+      log('error', '注销单窗口 IPC 处理器时出错:', error);
     }
-  } catch (error) {
-    log('error', '清理翻译集成时出错:', error);
-  }
 
-  // 8. 清理通知管理器
-  try {
-    if (notificationManager) {
-      notificationManager.clearAll();
-      log('info', '通知管理器已清理');
+    try {
+      unregisterTranslationIPCHandlers();
+      log('info', '翻译 IPC 处理器已注销');
+    } catch (error) {
+      log('error', '注销翻译 IPC 处理器时出错:', error);
     }
-  } catch (error) {
-    log('error', '清理通知管理器时出错:', error);
-  }
 
-  // 9. 清理临时资源
-  try {
-    // 清理错误处理器的重启定时器
-    if (errorHandler) {
-      errorHandler.clearAllCrashHistory();
-      log('info', '错误处理器已清理');
+    // 6. 清理翻译集成
+    try {
+      if (translationIntegration) {
+        translationIntegration.cleanup();
+        log('info', '翻译集成已清理');
+      }
+    } catch (error) {
+      log('error', '清理翻译集成时出错:', error);
     }
-  } catch (error) {
-    log('error', '清理错误处理器时出错:', error);
-  }
 
-  log('info', '资源清理完成');
+    // 7. 清理通知管理器
+    try {
+      if (notificationManager) {
+        notificationManager.clearAll();
+        log('info', '通知管理器已清理');
+      }
+    } catch (error) {
+      log('error', '清理通知管理器时出错:', error);
+    }
+
+    // 8. 清理会话管理器
+    try {
+      if (sessionManager) {
+        // SessionManager 不需要显式清理，Electron 会自动处理
+        log('info', '会话管理器已清理');
+      }
+    } catch (error) {
+      log('error', '清理会话管理器时出错:', error);
+    }
+
+    log('info', '资源清理完成');
+  } catch (error) {
+    log('error', '资源清理过程中发生错误:', error);
+    // 即使出错也继续，确保应用能够退出
+  }
 }
 
 /**
@@ -381,12 +454,27 @@ app.whenReady().then(async () => {
     // 1. 检查并执行数据迁移
     try {
       log('info', '检查数据迁移...');
-      const migrationResult = await checkAndMigrate(app.getPath('userData'));
       
-      if (migrationResult.migrated) {
-        log('info', '数据迁移完成');
-      } else if (migrationResult.error) {
-        log('warn', `数据迁移失败: ${migrationResult.error}`);
+      migrationManager = new MigrationManager({
+        userDataPath: app.getPath('userData')
+      });
+      
+      const detectionResult = await migrationManager.detectMigrationNeeded();
+      
+      if (detectionResult.needed) {
+        log('info', '检测到需要迁移，显示迁移对话框');
+        
+        // 显示迁移对话框
+        const migrationDialog = new MigrationDialog();
+        const migrationResult = await migrationDialog.showMigrationDialog(migrationManager);
+        
+        if (migrationResult.success) {
+          log('info', '数据迁移完成');
+        } else if (migrationResult.cancelled) {
+          log('info', '用户取消迁移');
+        } else {
+          log('warn', `数据迁移失败: ${migrationResult.error}`);
+        }
       } else {
         log('info', '无需迁移');
       }
@@ -401,39 +489,66 @@ app.whenReady().then(async () => {
     // 3. 注册所有 IPC 处理器
     await registerAllIPCHandlers();
 
-    // 4. 检查是否为首次运行
-    try {
-      firstRunWizard = new FirstRunWizardIntegration(
-        mainApplicationWindow.getWindow(),
-        accountConfigManager
-      );
-      
-      const isFirstRun = await firstRunWizard.checkFirstRun();
-      
-      if (isFirstRun) {
-        log('info', '检测到首次运行，显示欢迎向导');
-        await firstRunWizard.showWelcomeWizard();
-      }
-    } catch (error) {
-      log('error', '首次运行向导失败:', error);
-      // 不阻止应用启动
-    }
-
-    // 5. 加载并显示账号列表
+    // 4. 加载并显示账号列表
     try {
       const accounts = await accountConfigManager.loadAccounts();
-      mainApplicationWindow.renderAccountList(accounts);
+      
+      // 发送账号列表到渲染进程
+      mainWindow.sendToRenderer('accounts-loaded', {
+        accounts: accounts.map(acc => acc.toJSON())
+      });
+      
       log('info', `加载了 ${accounts.length} 个账号配置`);
     } catch (error) {
       log('error', '加载账号列表失败:', error);
     }
 
-    // 6. 自动启动配置的账号（如果启用）
-    if (config.autoStart !== false) {
-      // 延迟一下，让主窗口先显示
-      setTimeout(async () => {
-        await autoStartInstances();
-      }, 2000);
+    // 5. 恢复上次活跃的账号或自动启动配置的账号
+    try {
+      // 首先尝试恢复上次活跃的账号
+      const savedAccountId = viewManager.getSavedActiveAccountId();
+      
+      if (savedAccountId) {
+        const account = await accountConfigManager.getAccount(savedAccountId);
+        
+        if (account) {
+          const restoreResult = await viewManager.switchView(savedAccountId, {
+            createIfMissing: true,
+            viewConfig: {
+              url: 'https://web.whatsapp.com',
+              proxy: account.proxy,
+              translation: account.translation
+            }
+          });
+          
+          if (restoreResult.success) {
+            log('info', `恢复上次活跃账号: ${savedAccountId}`);
+          } else {
+            log('warn', `恢复账号失败: ${restoreResult.error}`);
+            // 尝试自动启动
+            if (config.autoStart !== false) {
+              setTimeout(async () => {
+                await autoStartAccounts();
+              }, 1000);
+            }
+          }
+        } else {
+          log('warn', `保存的账号 ${savedAccountId} 不存在`);
+          // 尝试自动启动
+          if (config.autoStart !== false) {
+            setTimeout(async () => {
+              await autoStartAccounts();
+            }, 1000);
+          }
+        }
+      } else if (config.autoStart !== false) {
+        // 如果没有上次活跃的账号，尝试自动启动
+        setTimeout(async () => {
+          await autoStartAccounts();
+        }, 1000);
+      }
+    } catch (error) {
+      log('error', '恢复账号失败:', error);
     }
 
     log('info', '应用启动完成');
@@ -446,11 +561,39 @@ app.whenReady().then(async () => {
 
   // macOS 特定：点击 dock 图标时显示主窗口
   app.on('activate', () => {
-    if (mainApplicationWindow) {
-      mainApplicationWindow.focus();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.focus();
     }
   });
 });
+
+/**
+ * 主窗口关闭事件处理
+ * 在窗口关闭时保存状态
+ */
+function setupMainWindowCloseHandler() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  const window = mainWindow.getWindow();
+  if (!window) {
+    return;
+  }
+
+  // 监听窗口关闭事件
+  window.on('close', async (event) => {
+    log('info', '主窗口正在关闭');
+
+    try {
+      // 保存应用状态
+      await saveApplicationState();
+      log('info', '窗口关闭前状态已保存');
+    } catch (error) {
+      log('error', '保存窗口关闭状态时出错:', error);
+    }
+  });
+}
 
 /**
  * 所有窗口关闭事件
@@ -475,10 +618,48 @@ app.on('window-all-closed', async () => {
 
 /**
  * 应用退出前事件
+ * 执行最终清理工作
  */
-app.on('before-quit', async () => {
+app.on('before-quit', async (event) => {
   log('info', '应用即将退出');
-  await cleanup();
+
+  // 防止重复清理
+  if (app.isQuitting) {
+    log('info', '清理已完成，允许退出');
+    return;
+  }
+
+  // 标记正在退出
+  app.isQuitting = true;
+
+  try {
+    // 执行清理
+    await cleanup();
+    log('info', '退出前清理完成');
+  } catch (error) {
+    log('error', '退出前清理失败:', error);
+  }
+});
+
+/**
+ * 应用即将退出事件
+ * 最后的清理机会
+ */
+app.on('will-quit', (event) => {
+  log('info', '应用正在退出');
+
+  // 确保所有资源都已清理
+  if (viewManager) {
+    try {
+      // 同步停止所有监控
+      viewManager.stopAllConnectionMonitoring();
+      viewManager.stopAllLoginStatusMonitoring();
+    } catch (error) {
+      log('error', '停止监控失败:', error);
+    }
+  }
+
+  log('info', '应用退出完成');
 });
 
 /**
@@ -486,20 +667,92 @@ app.on('before-quit', async () => {
  */
 process.on('uncaughtException', (error) => {
   log('error', '未捕获的异常:', error);
+  log('error', '错误堆栈:', error.stack);
+
+  // 尝试保存状态
+  try {
+    if (accountConfigManager && viewManager) {
+      saveApplicationState().catch(err => {
+        log('error', '紧急保存状态失败:', err);
+      });
+    }
+  } catch (err) {
+    log('error', '紧急保存失败:', err);
+  }
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   log('error', '未处理的 Promise 拒绝:', reason);
+  if (reason instanceof Error) {
+    log('error', '错误堆栈:', reason.stack);
+  }
 });
 
 // 启动信息
 log('info', '========================================');
-log('info', 'WhatsApp Desktop Container');
+log('info', 'WhatsApp Desktop - Single Window Architecture');
 log('info', `版本: ${app.getVersion()}`);
 log('info', `Node.js: ${process.versions.node}`);
 log('info', `Electron: ${process.versions.electron}`);
 log('info', `Chromium: ${process.versions.chrome}`);
 log('info', `平台: ${process.platform}`);
 log('info', `环境: ${process.env.NODE_ENV || 'development'}`);
-log('info', `会话路径: ${config.sessionPath}`);
+log('info', `用户数据路径: ${app.getPath('userData')}`);
 log('info', '========================================');
+
+
+/**
+ * Send account error to renderer
+ * @param {string} accountId - Account ID
+ * @param {string} errorMessage - Error message
+ * @param {string} category - Error category
+ * @param {string} [severity='error'] - Error severity
+ */
+function sendAccountError(accountId, errorMessage, category, severity = 'error') {
+  if (mainWindow && mainWindow.isReady()) {
+    mainWindow.sendToRenderer('account-error', {
+      accountId,
+      error: errorMessage,
+      category,
+      severity,
+      timestamp: Date.now()
+    });
+  }
+}
+
+/**
+ * Send global error to renderer
+ * @param {string} errorMessage - Error message
+ * @param {string} category - Error category
+ * @param {string} [level='error'] - Error level
+ */
+function sendGlobalError(errorMessage, category, level = 'error') {
+  if (mainWindow && mainWindow.isReady()) {
+    mainWindow.sendToRenderer('global-error', {
+      error: errorMessage,
+      category,
+      level,
+      timestamp: Date.now()
+    });
+  }
+}
+
+/**
+ * Clear error from renderer
+ * @param {string} [accountId] - Account ID (if account-specific)
+ */
+function clearError(accountId = null) {
+  if (mainWindow && mainWindow.isReady()) {
+    mainWindow.sendToRenderer('error-cleared', {
+      accountId,
+      timestamp: Date.now()
+    });
+  }
+}
+
+// Export error notification functions for use in other modules
+module.exports = {
+  sendAccountError,
+  sendGlobalError,
+  clearError
+};

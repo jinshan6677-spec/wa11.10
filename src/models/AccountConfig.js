@@ -43,15 +43,6 @@ function uuidv4() {
  */
 
 /**
- * @typedef {Object} WindowConfig
- * @property {number} [x] - 窗口 X 坐标
- * @property {number} [y] - 窗口 Y 坐标
- * @property {number} width - 窗口宽度
- * @property {number} height - 窗口高度
- * @property {boolean} minimized - 是否最小化
- */
-
-/**
  * @typedef {Object} NotificationConfig
  * @property {boolean} enabled - 是否启用通知
  * @property {boolean} sound - 是否启用声音
@@ -62,12 +53,15 @@ function uuidv4() {
  * @typedef {Object} AccountConfig
  * @property {string} id - 唯一标识符（UUID）
  * @property {string} name - 账号名称
+ * @property {string} [note] - 账号备注（可选）
+ * @property {number} order - 侧边栏显示顺序
  * @property {Date} createdAt - 创建时间
  * @property {Date} lastActiveAt - 最后活跃时间
+ * @property {boolean} autoStart - 是否自动启动
  * @property {ProxyConfig} proxy - 代理配置
  * @property {TranslationConfig} translation - 翻译配置
- * @property {WindowConfig} window - 窗口配置
  * @property {NotificationConfig} notifications - 通知配置
+ * @property {string} sessionDir - 会话数据目录路径
  */
 
 /**
@@ -81,8 +75,14 @@ class AccountConfig {
   constructor(config = {}) {
     this.id = config.id || uuidv4();
     this.name = config.name || `Account ${this.id.substring(0, 8)}`;
+    this.note = config.note || '';
+    this.order = config.order !== undefined ? config.order : 0;
     this.createdAt = config.createdAt ? new Date(config.createdAt) : new Date();
     this.lastActiveAt = config.lastActiveAt ? new Date(config.lastActiveAt) : new Date();
+    this.autoStart = config.autoStart !== undefined ? config.autoStart : false;
+    
+    // 会话数据目录路径
+    this.sessionDir = config.sessionDir || `session-data/account-${this.id}`;
     
     // 代理配置
     this.proxy = {
@@ -98,7 +98,7 @@ class AccountConfig {
     
     // 翻译配置
     this.translation = {
-      enabled: false,
+      enabled: true,
       targetLanguage: 'zh-CN',
       engine: 'google',
       apiKey: '',
@@ -108,14 +108,6 @@ class AccountConfig {
       ...(config.translation || {})
     };
     
-    // 窗口配置
-    this.window = {
-      width: 1200,
-      height: 800,
-      minimized: false,
-      ...(config.window || {})
-    };
-    
     // 通知配置
     this.notifications = {
       enabled: true,
@@ -123,6 +115,12 @@ class AccountConfig {
       badge: true,
       ...(config.notifications || {})
     };
+    
+    // 向后兼容：如果存在旧的 window 配置，忽略它但不报错
+    // 这样旧配置文件仍然可以加载
+    if (config.window) {
+      console.warn(`Account ${this.id}: window configuration is deprecated and will be ignored`);
+    }
   }
 
   /**
@@ -137,11 +135,14 @@ class AccountConfig {
     return {
       id: this.id,
       name: this.name,
+      note: this.note,
+      order: this.order,
       createdAt: createdAt.toISOString(),
       lastActiveAt: lastActiveAt.toISOString(),
+      autoStart: this.autoStart,
+      sessionDir: this.sessionDir,
       proxy: this.proxy,
       translation: this.translation,
-      window: this.window,
       notifications: this.notifications
     };
   }
@@ -170,6 +171,16 @@ class AccountConfig {
     // 验证名称
     if (!this.name || typeof this.name !== 'string' || this.name.trim().length === 0) {
       errors.push('Account name is required');
+    }
+
+    // 验证 order 字段
+    if (typeof this.order !== 'number' || this.order < 0) {
+      errors.push('Order must be a non-negative number');
+    }
+
+    // 验证 sessionDir
+    if (!this.sessionDir || typeof this.sessionDir !== 'string' || this.sessionDir.trim().length === 0) {
+      errors.push('Session directory path is required');
     }
 
     // 验证代理配置
@@ -203,15 +214,6 @@ class AccountConfig {
           errors.push(`API key is required for ${this.translation.engine} translation engine`);
         }
       }
-    }
-
-    // 验证窗口配置
-    if (this.window.width && (typeof this.window.width !== 'number' || this.window.width < 400)) {
-      errors.push('Window width must be at least 400 pixels');
-    }
-    
-    if (this.window.height && (typeof this.window.height !== 'number' || this.window.height < 300)) {
-      errors.push('Window height must be at least 300 pixels');
     }
 
     return {

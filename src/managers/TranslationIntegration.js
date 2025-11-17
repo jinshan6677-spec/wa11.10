@@ -1,8 +1,16 @@
 /**
  * TranslationIntegration - 翻译系统集成
  * 
- * 负责为每个账号实例注入翻译脚本并管理独立的翻译配置
- * 确保现有翻译功能在多实例架构中正常工作
+ * 负责为每个账号注入翻译脚本并管理独立的翻译配置
+ * 支持多窗口架构 (BrowserWindow) 和单窗口架构 (BrowserView)
+ * 确保现有翻译功能在两种架构中都能正常工作
+ * 
+ * 主要功能:
+ * - 注入 window.ACCOUNT_ID 到每个 BrowserView 上下文
+ * - 注入翻译优化器脚本 (contentScriptWithOptimizer.js)
+ * - 注入主翻译脚本 (contentScript.js)
+ * - 处理脚本注入时机 (页面加载时)
+ * - 管理每个账号的独立翻译配置
  */
 
 const path = require('path');
@@ -25,15 +33,15 @@ const fs = require('fs').promises;
 class TranslationIntegration {
   /**
    * 创建翻译集成实例
-   * @param {Object} instanceManager - 实例管理器引用
+   * @param {Object} [instanceManager] - 实例管理器引用 (可选，用于向后兼容)
    */
-  constructor(instanceManager) {
+  constructor(instanceManager = null) {
     this.instanceManager = instanceManager;
     
-    // 存储每个实例的翻译配置 Map: instanceId -> TranslationConfig
+    // 存储每个账号的翻译配置 Map: accountId -> TranslationConfig
     this.translationConfigs = new Map();
     
-    // 存储每个实例的翻译状态 Map: instanceId -> status
+    // 存储每个账号的翻译状态 Map: accountId -> status
     this.translationStatuses = new Map();
     
     // 缓存翻译脚本内容
@@ -107,71 +115,80 @@ class TranslationIntegration {
   }
 
   /**
-   * 为实例注入翻译脚本
-   * @param {string} instanceId - 实例 ID
-   * @param {BrowserWindow} window - 浏览器窗口
+   * 为实例注入翻译脚本 (支持 BrowserWindow 和 BrowserView)
+   * @param {string} accountId - 账号 ID
+   * @param {BrowserWindow|BrowserView} target - 浏览器窗口或 BrowserView
    * @param {TranslationConfig} [translationConfig] - 翻译配置
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async injectScripts(instanceId, window, translationConfig = null) {
-    this.log('info', `Injecting translation scripts for instance ${instanceId}`);
+  async injectScripts(accountId, target, translationConfig = null) {
+    this.log('info', `Injecting translation scripts for account ${accountId}`);
     
     try {
-      // 检查窗口是否有效
-      if (!window || window.isDestroyed()) {
+      // 获取 webContents (支持 BrowserWindow 和 BrowserView)
+      const webContents = target.webContents;
+      
+      // 检查 webContents 是否有效
+      if (!webContents || webContents.isDestroyed()) {
         return {
           success: false,
-          error: 'Window is invalid or destroyed'
+          error: 'WebContents is invalid or destroyed'
         };
       }
 
       // 存储翻译配置
       if (translationConfig) {
-        this.translationConfigs.set(instanceId, translationConfig);
+        this.translationConfigs.set(accountId, translationConfig);
       }
 
       // 设置 did-finish-load 事件监听器
-      window.webContents.on('did-finish-load', async () => {
-        this.log('info', `Page loaded for instance ${instanceId}, injecting scripts`);
+      webContents.on('did-finish-load', async () => {
+        this.log('info', `Page loaded for account ${accountId}, injecting scripts`);
         
         try {
+          // 注入 window.ACCOUNT_ID
+          await webContents.executeJavaScript(`
+            window.ACCOUNT_ID = '${accountId}';
+            console.log('[Translation] Account ID injected: ${accountId}');
+          `);
+          
           // 注入性能优化器
           if (this.scriptCache.optimizer) {
-            await window.webContents.executeJavaScript(this.scriptCache.optimizer);
-            this.log('info', `Optimizer injected for instance ${instanceId}`);
+            await webContents.executeJavaScript(this.scriptCache.optimizer);
+            this.log('info', `Optimizer injected for account ${accountId}`);
           }
           
           // 注入主翻译脚本
           if (this.scriptCache.contentScript) {
-            await window.webContents.executeJavaScript(this.scriptCache.contentScript);
-            this.log('info', `Content script injected for instance ${instanceId}`);
+            await webContents.executeJavaScript(this.scriptCache.contentScript);
+            this.log('info', `Content script injected for account ${accountId}`);
           }
           
           // 初始化翻译系统
-          await window.webContents.executeJavaScript(`
+          await webContents.executeJavaScript(`
             (async function() {
               if (window.WhatsAppTranslation) {
-                window.WhatsAppTranslation.accountId = '${instanceId}';
+                window.WhatsAppTranslation.accountId = '${accountId}';
                 await window.WhatsAppTranslation.init();
-                console.log('[Translation] Initialized for account ${instanceId}');
+                console.log('[Translation] Initialized for account ${accountId}');
               }
             })();
           `);
           
           // 更新状态
-          this.translationStatuses.set(instanceId, {
+          this.translationStatuses.set(accountId, {
             injected: true,
             lastInjectionTime: new Date(),
             error: null
           });
           
-          this.log('info', `Translation scripts successfully injected for instance ${instanceId}`);
+          this.log('info', `Translation scripts successfully injected for account ${accountId}`);
           
         } catch (error) {
-          this.log('error', `Failed to inject scripts for instance ${instanceId}:`, error);
+          this.log('error', `Failed to inject scripts for account ${accountId}:`, error);
           
           // 更新状态
-          this.translationStatuses.set(instanceId, {
+          this.translationStatuses.set(accountId, {
             injected: false,
             lastInjectionTime: new Date(),
             error: error.message
@@ -180,42 +197,48 @@ class TranslationIntegration {
       });
 
       // 如果页面已经加载，立即注入
-      if (window.webContents.getURL().includes('web.whatsapp.com')) {
-        this.log('info', `Page already loaded for instance ${instanceId}, injecting immediately`);
+      if (webContents.getURL().includes('web.whatsapp.com')) {
+        this.log('info', `Page already loaded for account ${accountId}, injecting immediately`);
         
         try {
+          // 注入 window.ACCOUNT_ID
+          await webContents.executeJavaScript(`
+            window.ACCOUNT_ID = '${accountId}';
+            console.log('[Translation] Account ID injected: ${accountId}');
+          `);
+          
           // 注入性能优化器
           if (this.scriptCache.optimizer) {
-            await window.webContents.executeJavaScript(this.scriptCache.optimizer);
+            await webContents.executeJavaScript(this.scriptCache.optimizer);
           }
           
           // 注入主翻译脚本
           if (this.scriptCache.contentScript) {
-            await window.webContents.executeJavaScript(this.scriptCache.contentScript);
+            await webContents.executeJavaScript(this.scriptCache.contentScript);
           }
           
           // 初始化翻译系统
-          await window.webContents.executeJavaScript(`
+          await webContents.executeJavaScript(`
             (async function() {
               if (window.WhatsAppTranslation) {
-                window.WhatsAppTranslation.accountId = '${instanceId}';
+                window.WhatsAppTranslation.accountId = '${accountId}';
                 await window.WhatsAppTranslation.init();
               }
             })();
           `);
           
           // 更新状态
-          this.translationStatuses.set(instanceId, {
+          this.translationStatuses.set(accountId, {
             injected: true,
             lastInjectionTime: new Date(),
             error: null
           });
           
         } catch (error) {
-          this.log('error', `Failed to inject scripts immediately for instance ${instanceId}:`, error);
+          this.log('error', `Failed to inject scripts immediately for account ${accountId}:`, error);
           
           // 更新状态
-          this.translationStatuses.set(instanceId, {
+          this.translationStatuses.set(accountId, {
             injected: false,
             lastInjectionTime: new Date(),
             error: error.message
@@ -226,7 +249,7 @@ class TranslationIntegration {
       return { success: true };
       
     } catch (error) {
-      this.log('error', `Failed to setup script injection for instance ${instanceId}:`, error);
+      this.log('error', `Failed to setup script injection for account ${accountId}:`, error);
       return {
         success: false,
         error: error.message
@@ -235,45 +258,52 @@ class TranslationIntegration {
   }
 
   /**
-   * 配置实例的翻译设置
-   * @param {string} instanceId - 实例 ID
+   * 配置账号的翻译设置 (支持 BrowserWindow 和 BrowserView)
+   * @param {string} accountId - 账号 ID
    * @param {TranslationConfig} config - 翻译配置
+   * @param {BrowserWindow|BrowserView} [target] - 可选的目标窗口/视图
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async configureTranslation(instanceId, config) {
-    this.log('info', `Configuring translation for instance ${instanceId}`);
+  async configureTranslation(accountId, config, target = null) {
+    this.log('info', `Configuring translation for account ${accountId}`);
     
     try {
-      // 验证实例是否存在
-      const instance = this.instanceManager.instances.get(instanceId);
-      if (!instance) {
-        return {
-          success: false,
-          error: 'Instance not found'
-        };
+      let webContents = null;
+
+      // 如果提供了 target，直接使用
+      if (target) {
+        webContents = target.webContents;
+      } 
+      // 否则尝试从 instanceManager 获取 (向后兼容)
+      else if (this.instanceManager) {
+        const instance = this.instanceManager.instances.get(accountId);
+        if (!instance) {
+          return {
+            success: false,
+            error: 'Instance not found'
+          };
+        }
+        webContents = instance.window ? instance.window.webContents : null;
       }
 
-      const { window } = instance;
-      
-      // 检查窗口是否有效
-      if (!window || window.isDestroyed()) {
+      // 检查 webContents 是否有效
+      if (!webContents || webContents.isDestroyed()) {
         return {
           success: false,
-          error: 'Window is invalid or destroyed'
+          error: 'WebContents is invalid or destroyed'
         };
       }
 
       // 存储配置
-      this.translationConfigs.set(instanceId, config);
+      this.translationConfigs.set(accountId, config);
 
-      // 通过 IPC 将配置传递给渲染进程
-      // 使用 executeJavaScript 直接更新配置
-      await window.webContents.executeJavaScript(`
+      // 通过 executeJavaScript 直接更新配置
+      await webContents.executeJavaScript(`
         (async function() {
           if (window.WhatsAppTranslation) {
             // 更新配置
             window.WhatsAppTranslation.config = ${JSON.stringify(config)};
-            console.log('[Translation] Configuration updated for account ${instanceId}');
+            console.log('[Translation] Configuration updated for account ${accountId}');
             
             // 重新初始化相关功能
             if (window.WhatsAppTranslation.initialized) {
@@ -293,12 +323,12 @@ class TranslationIntegration {
         })();
       `);
 
-      this.log('info', `Translation configured successfully for instance ${instanceId}`);
+      this.log('info', `Translation configured successfully for account ${accountId}`);
       
       return { success: true };
       
     } catch (error) {
-      this.log('error', `Failed to configure translation for instance ${instanceId}:`, error);
+      this.log('error', `Failed to configure translation for account ${accountId}:`, error);
       return {
         success: false,
         error: error.message
@@ -307,67 +337,93 @@ class TranslationIntegration {
   }
 
   /**
-   * 获取实例的翻译状态
-   * @param {string} instanceId - 实例 ID
+   * 获取账号的翻译状态
+   * @param {string} accountId - 账号 ID
    * @returns {Object|null}
    */
-  getTranslationStatus(instanceId) {
-    return this.translationStatuses.get(instanceId) || null;
+  getTranslationStatus(accountId) {
+    return this.translationStatuses.get(accountId) || null;
   }
 
   /**
-   * 获取实例的翻译配置
-   * @param {string} instanceId - 实例 ID
+   * 获取账号的翻译配置
+   * @param {string} accountId - 账号 ID
    * @returns {TranslationConfig|null}
    */
-  getTranslationConfig(instanceId) {
-    return this.translationConfigs.get(instanceId) || null;
+  getTranslationConfig(accountId) {
+    return this.translationConfigs.get(accountId) || null;
   }
 
   /**
-   * 清除实例的翻译缓存
-   * @param {string} instanceId - 实例 ID
+   * 检查账号是否已注入翻译脚本
+   * @param {string} accountId - 账号 ID
+   * @returns {boolean}
+   */
+  isInjected(accountId) {
+    const status = this.translationStatuses.get(accountId);
+    return status ? status.injected : false;
+  }
+
+  /**
+   * 获取所有账号的翻译配置
+   * @returns {Map<string, TranslationConfig>}
+   */
+  getAllTranslationConfigs() {
+    return new Map(this.translationConfigs);
+  }
+
+  /**
+   * 清除账号的翻译缓存 (支持 BrowserWindow 和 BrowserView)
+   * @param {string} accountId - 账号 ID
+   * @param {BrowserWindow|BrowserView} [target] - 可选的目标窗口/视图
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async clearCache(instanceId) {
-    this.log('info', `Clearing translation cache for instance ${instanceId}`);
+  async clearCache(accountId, target = null) {
+    this.log('info', `Clearing translation cache for account ${accountId}`);
     
     try {
-      // 验证实例是否存在
-      const instance = this.instanceManager.instances.get(instanceId);
-      if (!instance) {
-        return {
-          success: false,
-          error: 'Instance not found'
-        };
+      let webContents = null;
+
+      // 如果提供了 target，直接使用
+      if (target) {
+        webContents = target.webContents;
+      } 
+      // 否则尝试从 instanceManager 获取 (向后兼容)
+      else if (this.instanceManager) {
+        const instance = this.instanceManager.instances.get(accountId);
+        if (!instance) {
+          return {
+            success: false,
+            error: 'Instance not found'
+          };
+        }
+        webContents = instance.window ? instance.window.webContents : null;
       }
 
-      const { window } = instance;
-      
-      // 检查窗口是否有效
-      if (!window || window.isDestroyed()) {
+      // 检查 webContents 是否有效
+      if (!webContents || webContents.isDestroyed()) {
         return {
           success: false,
-          error: 'Window is invalid or destroyed'
+          error: 'WebContents is invalid or destroyed'
         };
       }
 
       // 清除渲染进程中的翻译缓存
-      await window.webContents.executeJavaScript(`
+      await webContents.executeJavaScript(`
         (function() {
           if (window.contentScriptOptimizer) {
             window.contentScriptOptimizer.translationCache.clear();
-            console.log('[Translation] Cache cleared for account ${instanceId}');
+            console.log('[Translation] Cache cleared for account ${accountId}');
           }
         })();
       `);
 
-      this.log('info', `Translation cache cleared for instance ${instanceId}`);
+      this.log('info', `Translation cache cleared for account ${accountId}`);
       
       return { success: true };
       
     } catch (error) {
-      this.log('error', `Failed to clear cache for instance ${instanceId}:`, error);
+      this.log('error', `Failed to clear cache for account ${accountId}:`, error);
       return {
         success: false,
         error: error.message
@@ -376,14 +432,22 @@ class TranslationIntegration {
   }
 
   /**
-   * 移除实例的翻译配置和状态
+   * 移除账号的翻译配置和状态
+   * @param {string} accountId - 账号 ID
+   */
+  removeAccount(accountId) {
+    this.log('info', `Removing translation data for account ${accountId}`);
+    
+    this.translationConfigs.delete(accountId);
+    this.translationStatuses.delete(accountId);
+  }
+
+  /**
+   * 移除实例的翻译配置和状态 (向后兼容别名)
    * @param {string} instanceId - 实例 ID
    */
   removeInstance(instanceId) {
-    this.log('info', `Removing translation data for instance ${instanceId}`);
-    
-    this.translationConfigs.delete(instanceId);
-    this.translationStatuses.delete(instanceId);
+    return this.removeAccount(instanceId);
   }
 
   /**
@@ -415,21 +479,22 @@ class TranslationIntegration {
   }
 
   /**
-   * 更新实例的翻译配置（支持动态更新）
-   * @param {string} instanceId - 实例 ID
+   * 更新账号的翻译配置（支持动态更新）
+   * @param {string} accountId - 账号 ID
    * @param {Partial<TranslationConfig>} updates - 配置更新
+   * @param {BrowserWindow|BrowserView} [target] - 可选的目标窗口/视图
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async updateTranslationConfig(instanceId, updates) {
-    this.log('info', `Updating translation config for instance ${instanceId}`);
+  async updateTranslationConfig(accountId, updates, target = null) {
+    this.log('info', `Updating translation config for account ${accountId}`);
     
     try {
       // 获取当前配置
-      const currentConfig = this.translationConfigs.get(instanceId);
+      const currentConfig = this.translationConfigs.get(accountId);
       if (!currentConfig) {
         return {
           success: false,
-          error: 'Translation config not found for instance'
+          error: 'Translation config not found for account'
         };
       }
 
@@ -440,10 +505,10 @@ class TranslationIntegration {
       };
 
       // 应用新配置
-      return await this.configureTranslation(instanceId, newConfig);
+      return await this.configureTranslation(accountId, newConfig, target);
       
     } catch (error) {
-      this.log('error', `Failed to update translation config for instance ${instanceId}:`, error);
+      this.log('error', `Failed to update translation config for account ${accountId}:`, error);
       return {
         success: false,
         error: error.message
@@ -452,28 +517,43 @@ class TranslationIntegration {
   }
 
   /**
-   * 为所有运行中的实例应用翻译配置
+   * 为所有运行中的账号应用翻译配置
    * @param {TranslationConfig} config - 翻译配置
+   * @param {Map<string, Object>} [views] - 可选的视图映射 (accountId -> {view})
    * @returns {Promise<{success: boolean, applied: number, failed: number}>}
    */
-  async applyConfigToAllInstances(config) {
-    this.log('info', 'Applying translation config to all instances');
+  async applyConfigToAllAccounts(config, views = null) {
+    this.log('info', 'Applying translation config to all accounts');
     
     let applied = 0;
     let failed = 0;
 
-    const runningInstances = this.instanceManager.getRunningInstances();
-    
-    for (const instance of runningInstances) {
-      const result = await this.configureTranslation(instance.instanceId, config);
-      if (result.success) {
-        applied++;
-      } else {
-        failed++;
+    // 如果提供了 views (单窗口架构)
+    if (views && views.size > 0) {
+      for (const [accountId, viewState] of views) {
+        const result = await this.configureTranslation(accountId, config, viewState.view);
+        if (result.success) {
+          applied++;
+        } else {
+          failed++;
+        }
+      }
+    }
+    // 否则使用 instanceManager (多窗口架构，向后兼容)
+    else if (this.instanceManager) {
+      const runningInstances = this.instanceManager.getRunningInstances();
+      
+      for (const instance of runningInstances) {
+        const result = await this.configureTranslation(instance.instanceId, config);
+        if (result.success) {
+          applied++;
+        } else {
+          failed++;
+        }
       }
     }
 
-    this.log('info', `Applied config to ${applied} instances, ${failed} failed`);
+    this.log('info', `Applied config to ${applied} accounts, ${failed} failed`);
     
     return {
       success: failed === 0,
@@ -483,35 +563,52 @@ class TranslationIntegration {
   }
 
   /**
-   * 获取翻译性能统计
-   * @param {string} instanceId - 实例 ID
+   * 为所有运行中的实例应用翻译配置 (向后兼容别名)
+   * @param {TranslationConfig} config - 翻译配置
+   * @returns {Promise<{success: boolean, applied: number, failed: number}>}
+   */
+  async applyConfigToAllInstances(config) {
+    return this.applyConfigToAllAccounts(config);
+  }
+
+  /**
+   * 获取翻译性能统计 (支持 BrowserWindow 和 BrowserView)
+   * @param {string} accountId - 账号 ID
+   * @param {BrowserWindow|BrowserView} [target] - 可选的目标窗口/视图
    * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
    */
-  async getPerformanceStats(instanceId) {
-    this.log('info', `Getting performance stats for instance ${instanceId}`);
+  async getPerformanceStats(accountId, target = null) {
+    this.log('info', `Getting performance stats for account ${accountId}`);
     
     try {
-      // 验证实例是否存在
-      const instance = this.instanceManager.instances.get(instanceId);
-      if (!instance) {
-        return {
-          success: false,
-          error: 'Instance not found'
-        };
+      let webContents = null;
+
+      // 如果提供了 target，直接使用
+      if (target) {
+        webContents = target.webContents;
+      } 
+      // 否则尝试从 instanceManager 获取 (向后兼容)
+      else if (this.instanceManager) {
+        const instance = this.instanceManager.instances.get(accountId);
+        if (!instance) {
+          return {
+            success: false,
+            error: 'Instance not found'
+          };
+        }
+        webContents = instance.window ? instance.window.webContents : null;
       }
 
-      const { window } = instance;
-      
-      // 检查窗口是否有效
-      if (!window || window.isDestroyed()) {
+      // 检查 webContents 是否有效
+      if (!webContents || webContents.isDestroyed()) {
         return {
           success: false,
-          error: 'Window is invalid or destroyed'
+          error: 'WebContents is invalid or destroyed'
         };
       }
 
       // 获取性能统计
-      const stats = await window.webContents.executeJavaScript(`
+      const stats = await webContents.executeJavaScript(`
         (function() {
           if (window.getTranslationPerformanceStats) {
             return window.getTranslationPerformanceStats();
@@ -533,7 +630,7 @@ class TranslationIntegration {
       }
       
     } catch (error) {
-      this.log('error', `Failed to get performance stats for instance ${instanceId}:`, error);
+      this.log('error', `Failed to get performance stats for account ${accountId}:`, error);
       return {
         success: false,
         error: error.message

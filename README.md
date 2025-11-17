@@ -249,8 +249,11 @@ npm run version
 
 ### 用户文档
 
-- **[用户指南](docs/USER_GUIDE.md)** - 完整的功能使用说明
+- **[单窗口用户指南](docs/SINGLE_WINDOW_USER_GUIDE.md)** - 新版单窗口界面完整使用说明
+- **[迁移指南](docs/MIGRATION_GUIDE.md)** - 从多窗口版本迁移到单窗口版本
+- **[账号管理快速参考](docs/ACCOUNT_MANAGEMENT_QUICK_REFERENCE.md)** - 账号管理功能快速查询
 - **[常见问题](docs/FAQ.md)** - 常见问题解答
+- **[用户指南](docs/USER_GUIDE.md)** - 完整的功能使用说明（旧版）
 - **[翻译引擎配置](docs/USER_GUIDE.md#翻译引擎配置)** - 各引擎配置指南
 
 ### 开发者文档

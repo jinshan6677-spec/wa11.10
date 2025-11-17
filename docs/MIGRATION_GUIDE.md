@@ -1,284 +1,530 @@
-# Migration Guide: Single Instance to Multi-Instance Architecture
+# Migration Guide: Multi-Window to Single-Window Architecture
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [What's Changing](#whats-changing)
+3. [Before You Migrate](#before-you-migrate)
+4. [Automatic Migration Process](#automatic-migration-process)
+5. [Manual Migration](#manual-migration)
+6. [After Migration](#after-migration)
+7. [Troubleshooting](#troubleshooting)
+8. [Rollback Instructions](#rollback-instructions)
+
+---
 
 ## Overview
 
-This guide explains the migration process from the old single-instance architecture to the new multi-instance architecture that supports multiple WhatsApp accounts.
+This guide helps you migrate from the old multi-window version of WhatsApp Desktop to the new single-window architecture. The migration process is designed to be automatic and seamless, preserving all your accounts, login states, and settings.
 
-## What Gets Migrated
+### What Gets Migrated?
 
-The migration process handles the following:
+✅ **Preserved:**
+- All account configurations
+- Login states (you won't need to re-scan QR codes)
+- Session data (chat history, media cache)
+- Proxy settings
+- Translation settings
+- Account names and notes
 
-1. **Session Data**: Your existing WhatsApp login session is preserved
-2. **Translation Configuration**: All translation settings are migrated
-3. **Account Configuration**: A default account is created with your existing settings
+❌ **Not Preserved:**
+- Window positions and sizes (replaced by sidebar order)
+- Individual window states
+- Multi-window specific settings
 
-## Migration Process
+---
 
-### Automatic Migration
+## What's Changing
 
-The application will automatically detect if migration is needed when you start it for the first time after upgrading. The migration happens transparently in the background.
-
-**What happens:**
-1. The app checks for the old `session-data` directory
-2. If found, it copies the session data to `profiles/default`
-3. It loads your translation settings from `enable-translation-config.json`
-4. It creates a default account configuration
-5. It marks the migration as completed
-
-### Manual Migration
-
-If you prefer to run the migration manually, you can use the migration script:
-
-```bash
-node scripts/migrate-to-multi-instance.js
-```
-
-This is useful if you want to:
-- Verify the migration before starting the app
-- Troubleshoot migration issues
-- Re-run the migration after making changes
-
-## Directory Structure
-
-### Before Migration (Single Instance)
+### Old Architecture (Multi-Window)
 
 ```
-session-data/
-  └── session/
-      ├── Cookies
-      ├── Local Storage/
-      ├── IndexedDB/
-      └── ...
+┌──────────┐  ┌──────────┐  ┌──────────┐
+│ Account1 │  │ Account2 │  │ Account3 │
+│  Window  │  │  Window  │  │  Window  │
+└──────────┘  └──────────┘  └──────────┘
 ```
 
-### After Migration (Multi-Instance)
+- Each account in a separate window
+- Windows can be positioned independently
+- Each window has its own taskbar entry
+
+### New Architecture (Single-Window)
 
 ```
-profiles/
-  └── default/
-      ├── Cookies
-      ├── Local Storage/
-      ├── IndexedDB/
-      └── ...
-
-accounts.json (account configurations)
-.migration-completed (migration marker)
+┌─────────────────────────────────────┐
+│  WhatsApp Desktop                   │
+├──────────┬──────────────────────────┤
+│ Account1 │                          │
+│ Account2 │   Active Account View    │
+│ Account3 │                          │
+└──────────┴──────────────────────────┘
 ```
 
-## Configuration Migration
+- All accounts in one window
+- Sidebar for account management
+- Quick switching between accounts
+- Single taskbar entry
 
-### Translation Settings
+### Benefits of the New Architecture
 
-Your existing translation configuration is automatically migrated:
+1. **Less Window Clutter**: One window instead of many
+2. **Faster Switching**: Instant account switching
+3. **Better Organization**: Sidebar shows all accounts at once
+4. **Improved Performance**: Optimized memory usage
+5. **Unified Interface**: Consistent experience across accounts
 
-**Old Format** (`enable-translation-config.json`):
-```json
-{
-  "accounts": {
-    "default": {
-      "global": {
-        "autoTranslate": true,
-        "engine": "google",
-        "targetLang": "zh-CN"
-      },
-      "inputBox": {
-        "enabled": true
-      }
-    }
-  }
-}
-```
+---
 
-**New Format** (in account configuration):
-```json
-{
-  "id": "default",
-  "name": "Default Account",
-  "translation": {
-    "enabled": true,
-    "targetLanguage": "zh-CN",
-    "engine": "google",
-    "autoTranslate": true,
-    "translateInput": true
-  }
-}
-```
+## Before You Migrate
 
-## Verification
+### System Requirements
 
-After migration, verify that everything works:
+Ensure your system meets the requirements:
+- **Operating System**: Windows 10+, macOS 10.13+, or Linux
+- **RAM**: 4GB minimum, 8GB recommended
+- **Disk Space**: 500MB free space
+- **Internet**: Active internet connection
 
-1. **Check Session**: Start the app and verify you're still logged in
-2. **Check Translation**: Verify translation settings are preserved
-3. **Check Files**: Verify the new directory structure exists
+### Backup Your Data
 
-### Check Migration Status
+While migration is safe, we recommend backing up your data:
 
-You can check the migration status programmatically:
+1. **Close the application** completely
+2. **Locate your data directory**:
+   - Windows: `%APPDATA%/whatsapp-desktop/`
+   - macOS: `~/Library/Application Support/whatsapp-desktop/`
+   - Linux: `~/.config/whatsapp-desktop/`
+3. **Copy the entire directory** to a safe location
+4. **Label the backup** with the date
 
+### Check Your Accounts
+
+Before migrating:
+- ✅ Ensure all accounts are logged in
+- ✅ Verify all accounts are working properly
+- ✅ Note any custom settings you've configured
+- ✅ Export account configurations (optional)
+
+---
+
+## Automatic Migration Process
+
+### First Launch
+
+When you first launch the new version:
+
+1. **Detection Phase**
+   ```
+   ┌─────────────────────────────────────┐
+   │  Detecting existing configuration   │
+   │  Found 3 accounts to migrate        │
+   │                                     │
+   │  [Continue]  [Cancel]               │
+   └─────────────────────────────────────┘
+   ```
+   - The application detects your old configuration
+   - Shows how many accounts will be migrated
+   - Click **Continue** to proceed
+
+2. **Backup Phase**
+   ```
+   ┌─────────────────────────────────────┐
+   │  Creating backup...                 │
+   │  ████████████████░░░░░░░░░  75%     │
+   │                                     │
+   │  Backing up configuration files     │
+   └─────────────────────────────────────┘
+   ```
+   - Creates a backup of your old configuration
+   - Stored in `backup-{timestamp}` directory
+   - Takes a few seconds
+
+3. **Migration Phase**
+   ```
+   ┌─────────────────────────────────────┐
+   │  Migrating accounts...              │
+   │  ████████████████████████  100%     │
+   │                                     │
+   │  ✓ Personal (acc_001)               │
+   │  ✓ Work (acc_002)                   │
+   │  ✓ Business (acc_003)               │
+   └─────────────────────────────────────┘
+   ```
+   - Converts each account to the new format
+   - Preserves all settings and session data
+   - Shows progress for each account
+
+4. **Verification Phase**
+   ```
+   ┌─────────────────────────────────────┐
+   │  Verifying migration...             │
+   │                                     │
+   │  ✓ All accounts migrated            │
+   │  ✓ Session data verified            │
+   │  ✓ Settings preserved               │
+   │                                     │
+   │  [Launch Application]               │
+   └─────────────────────────────────────┘
+   ```
+   - Verifies all accounts were migrated successfully
+   - Checks session data integrity
+   - Click **Launch Application** to start
+
+### What Happens During Migration
+
+**Account Configuration:**
 ```javascript
-const { getMigrationStatus } = require('./src/managers/autoMigration');
+// Old Format
+{
+  id: "acc_001",
+  name: "Personal",
+  window: { x: 100, y: 100, width: 1200, height: 800 },
+  proxy: { ... },
+  translation: { ... }
+}
 
-const status = await getMigrationStatus(userDataPath);
-console.log(status);
-// {
-//   completed: true,
-//   migrationDate: "2024-01-01T00:00:00.000Z",
-//   version: "1.0.0"
-// }
+// New Format
+{
+  id: "acc_001",
+  name: "Personal",
+  order: 0,  // Position in sidebar (based on window position)
+  proxy: { ... },
+  translation: { ... }
+}
 ```
+
+**Session Data:**
+- Session directories remain in the same location
+- No files are moved or modified
+- Only configuration references are updated
+
+**Settings:**
+- Proxy settings are preserved exactly
+- Translation settings are preserved exactly
+- Account names and notes are preserved
+
+---
+
+## Manual Migration
+
+If automatic migration fails or you prefer manual control:
+
+### Step 1: Export Old Configuration
+
+1. Launch the old version
+2. Go to **Settings** → **Export Configuration**
+3. Save the file as `accounts-backup.json`
+4. Close the old version
+
+### Step 2: Install New Version
+
+1. Download the new version
+2. Install it (may replace the old version)
+3. Don't launch it yet
+
+### Step 3: Prepare Migration
+
+1. Locate your data directory
+2. Find the old configuration file: `accounts.json`
+3. Rename it to `accounts-old.json`
+4. Copy your session data directories
+
+### Step 4: Launch and Import
+
+1. Launch the new version
+2. Click **"Skip Migration"** if prompted
+3. Go to **Settings** → **Import Configuration**
+4. Select your `accounts-backup.json` file
+5. Review the imported accounts
+6. Click **"Import"**
+
+### Step 5: Verify Accounts
+
+1. Check that all accounts appear in the sidebar
+2. Click each account to verify it loads
+3. Check that you're still logged in
+4. Verify proxy and translation settings
+
+---
+
+## After Migration
+
+### First Steps
+
+1. **Review Your Accounts**
+   - Check that all accounts are present
+   - Verify account names are correct
+   - Ensure status indicators show online
+
+2. **Test Each Account**
+   - Click each account in the sidebar
+   - Verify WhatsApp Web loads
+   - Check that you're logged in
+   - Send a test message
+
+3. **Verify Settings**
+   - Check proxy settings for each account
+   - Verify translation settings
+   - Test proxy connections
+   - Test translation functionality
+
+4. **Customize Layout**
+   - Reorder accounts by dragging
+   - Resize the sidebar to your preference
+   - Set up keyboard shortcuts
+
+### Cleanup Old Data
+
+After confirming everything works:
+
+1. **Old Configuration Backup**
+   - Located in `backup-{timestamp}` directory
+   - Can be deleted after 30 days
+   - Keep if you want to rollback
+
+2. **Old Application**
+   - Uninstall the old version if separate
+   - Remove old shortcuts
+   - Clean up old logs
+
+### New Features to Explore
+
+1. **Quick Switching**
+   - Use `Ctrl+1` through `Ctrl+9` for quick access
+   - Try `Ctrl+Tab` to cycle through accounts
+
+2. **Sidebar Customization**
+   - Drag accounts to reorder
+   - Resize sidebar width
+   - Hover for account notes
+
+3. **Enhanced Status**
+   - Real-time status indicators
+   - Connection monitoring
+   - Error notifications
+
+---
 
 ## Troubleshooting
 
-### Migration Fails
+### Migration Failed
 
-If migration fails, check:
+**Symptoms**: Migration process shows errors
 
-1. **Permissions**: Ensure the app has write permissions to the user data directory
-2. **Disk Space**: Ensure sufficient disk space for copying session data
-3. **File Locks**: Close any other instances of the app
+**Solutions**:
+1. Check that the old configuration file exists
+2. Verify you have write permissions
+3. Ensure no other instance is running
+4. Try manual migration instead
+5. Restore from backup and try again
 
-### Session Not Preserved
+### Accounts Missing After Migration
 
-If your session is not preserved after migration:
+**Symptoms**: Some accounts don't appear in sidebar
 
-1. Check if the old `session-data/session` directory existed
-2. Verify the `profiles/default` directory was created
-3. Check the migration logs for errors
+**Solutions**:
+1. Check the migration log for errors
+2. Verify the old configuration file
+3. Try importing the backup manually
+4. Re-add missing accounts manually
+5. Contact support with log files
 
-### Translation Settings Not Migrated
+### Can't Log In After Migration
 
-If translation settings are not migrated:
+**Symptoms**: Accounts show QR code instead of logged-in state
 
-1. Check if `enable-translation-config.json` exists
-2. Verify the file is valid JSON
-3. Check the migration logs for parsing errors
+**Solutions**:
+1. Check that session data directories exist
+2. Verify session data wasn't corrupted
+3. Check file permissions on session directories
+4. Try clearing and re-logging in
+5. Restore session data from backup
 
-## Rollback
+### Proxy Settings Not Working
 
-If you need to rollback to the old architecture:
+**Symptoms**: Proxy doesn't work after migration
 
-1. Stop the application
-2. Delete the `profiles` directory
-3. Delete the `.migration-completed` marker file
-4. Delete the `accounts.json` file
-5. Your original `session-data` directory is preserved as a backup
+**Solutions**:
+1. Verify proxy settings were migrated
+2. Re-enter proxy credentials
+3. Test proxy connection
+4. Check proxy server is running
+5. Try disabling and re-enabling proxy
 
-## Data Safety
+### Translation Not Working
 
-The migration process is designed to be safe:
+**Symptoms**: Translation doesn't work after migration
 
-- **Non-Destructive**: Original session data is copied, not moved
-- **Idempotent**: Can be run multiple times safely
-- **Atomic**: Either completes fully or fails without partial changes
-- **Reversible**: Original data is preserved for rollback
+**Solutions**:
+1. Check translation settings were migrated
+2. Verify API keys are present
+3. Re-enter API keys if needed
+4. Test with a different engine
+5. Clear translation cache
 
-## Integration with Application
+### Performance Issues
 
-### In main.js
+**Symptoms**: Application is slow after migration
 
-To integrate automatic migration into your application:
+**Solutions**:
+1. Restart the application
+2. Clear browser cache for all accounts
+3. Reduce number of active accounts
+4. Check system resources
+5. Update to latest version
 
-```javascript
-const { app } = require('electron');
-const { autoMigrate } = require('./src/managers/autoMigration');
+### Window Size Issues
 
-app.whenReady().then(async () => {
-  // Run auto-migration
-  const migrationResult = await autoMigrate({
-    userDataPath: app.getPath('userData'),
-    silent: false
-  });
+**Symptoms**: Window is too small or too large
 
-  if (migrationResult.migrated) {
-    console.log('Migration completed:', migrationResult.message);
-  }
+**Solutions**:
+1. Resize the window manually
+2. Reset window size in settings
+3. Delete window state file
+4. Restart the application
+5. Check display scaling settings
 
-  // Continue with app initialization...
-});
-```
+---
 
-## API Reference
+## Rollback Instructions
 
-### MigrationManager
+If you need to revert to the old version:
 
-```javascript
-const MigrationManager = require('./src/managers/MigrationManager');
+### Option 1: Restore from Backup
 
-const manager = new MigrationManager({
-  userDataPath: '/path/to/user/data',
-  accountConfigManager: accountConfigManagerInstance
-});
+1. **Close the new version** completely
+2. **Locate the backup directory**:
+   - Look for `backup-{timestamp}` in your data directory
+3. **Restore configuration**:
+   - Copy `accounts-old.json` to `accounts.json`
+4. **Restore session data** (if needed):
+   - Session data should still be intact
+5. **Install old version**:
+   - Download and install the previous version
+6. **Launch and verify**:
+   - Check that all accounts work
 
-// Check if migration is needed
-const needsMigration = await manager.needsMigration();
+### Option 2: Manual Rollback
 
-// Execute migration
-const result = await manager.migrate();
+1. **Export current configuration** (to save any changes)
+2. **Uninstall new version**
+3. **Install old version**
+4. **Import old configuration**
+5. **Verify accounts work**
 
-// Get migration status
-const status = await manager.getMigrationStatus();
+### After Rollback
 
-// Reset migration (for testing)
-await manager.resetMigration();
-```
+- Your session data remains intact
+- You won't lose any messages or media
+- You can try migrating again later
+- Report issues to help improve migration
 
-### autoMigrate Function
+---
 
-```javascript
-const { autoMigrate } = require('./src/managers/autoMigration');
+## Migration Checklist
 
-const result = await autoMigrate({
-  userDataPath: '/path/to/user/data',
-  silent: false // Set to true to suppress logs
-});
+Use this checklist to ensure a smooth migration:
 
-// result: {
-//   migrated: boolean,
-//   message: string,
-//   details?: Object,
-//   error?: boolean
-// }
-```
+### Before Migration
 
-## FAQ
+- [ ] Backup your data directory
+- [ ] Export account configurations
+- [ ] Note any custom settings
+- [ ] Ensure all accounts are logged in
+- [ ] Close all instances of the old version
+- [ ] Check system requirements
 
-### Q: Will I lose my WhatsApp login?
-**A:** No, your session data is preserved during migration.
+### During Migration
 
-### Q: Can I use the old version after migration?
-**A:** Yes, the old session data is preserved. However, any changes made in the new version won't be reflected in the old version.
+- [ ] Read migration prompts carefully
+- [ ] Don't interrupt the migration process
+- [ ] Wait for verification to complete
+- [ ] Note any error messages
+- [ ] Take screenshots if issues occur
 
-### Q: What happens if migration is interrupted?
-**A:** The migration is designed to be safe. If interrupted, you can simply run it again.
+### After Migration
 
-### Q: How long does migration take?
-**A:** Usually less than a few seconds, depending on the size of your session data.
+- [ ] Verify all accounts are present
+- [ ] Test each account loads correctly
+- [ ] Check you're still logged in
+- [ ] Verify proxy settings
+- [ ] Test translation functionality
+- [ ] Customize sidebar layout
+- [ ] Set up keyboard shortcuts
+- [ ] Clean up old data (after 30 days)
 
-### Q: Can I migrate multiple times?
-**A:** The migration only runs once. After completion, a marker file prevents re-running. You can manually reset this for testing.
+---
 
-### Q: What if I don't have old session data?
-**A:** The migration will skip gracefully and you can start fresh with the new architecture.
-
-## Support
+## Getting Help
 
 If you encounter issues during migration:
 
-1. Check the console logs for detailed error messages
-2. Review this guide for troubleshooting steps
-3. Report issues with migration logs attached
+### Support Resources
 
-## Next Steps
+1. **Documentation**: Review the [User Guide](SINGLE_WINDOW_USER_GUIDE.md)
+2. **FAQ**: Check the [FAQ](FAQ.md) for common issues
+3. **Community**: Ask in the [community forum](https://community.example.com)
+4. **Support**: Contact support with migration logs
 
-After successful migration:
+### Providing Information
 
-1. **Add More Accounts**: Use the account management UI to add additional WhatsApp accounts
-2. **Configure Proxies**: Set up independent proxies for each account
-3. **Customize Translation**: Configure translation settings per account
-4. **Explore Features**: Try the new multi-instance features
+When seeking help, include:
+- Migration log file (in data directory)
+- Error messages or screenshots
+- Number of accounts being migrated
+- Operating system and version
+- Old and new application versions
 
-For more information, see:
-- [User Guide](./USER_GUIDE.md)
-- [Developer Guide](./DEVELOPER_GUIDE.md)
-- [API Documentation](./API.md)
+### Migration Logs
+
+Logs are stored in:
+- Windows: `%APPDATA%/whatsapp-desktop/logs/migration.log`
+- macOS: `~/Library/Application Support/whatsapp-desktop/logs/migration.log`
+- Linux: `~/.config/whatsapp-desktop/logs/migration.log`
+
+---
+
+## Frequently Asked Questions
+
+### Will I lose my chat history?
+
+No, your chat history is stored by WhatsApp on their servers and on your phone. The migration only affects the desktop application configuration.
+
+### Do I need to re-scan QR codes?
+
+No, your login states are preserved. You should remain logged in after migration.
+
+### Can I use both versions simultaneously?
+
+No, it's recommended to use only one version at a time to avoid conflicts.
+
+### How long does migration take?
+
+Typically 1-2 minutes for most users. Time depends on the number of accounts and system performance.
+
+### Can I migrate back to the old version?
+
+Yes, you can rollback using the backup created during migration. See [Rollback Instructions](#rollback-instructions).
+
+### What if migration fails?
+
+You can try manual migration or restore from backup. Your data is safe and not modified during migration.
+
+### Will my proxy settings be preserved?
+
+Yes, all proxy settings are migrated exactly as configured in the old version.
+
+### Will my translation settings be preserved?
+
+Yes, all translation settings including API keys are migrated.
+
+---
+
+## Conclusion
+
+The migration from multi-window to single-window architecture is designed to be seamless and automatic. Most users will experience a smooth transition with all their accounts, settings, and login states preserved.
+
+If you encounter any issues, refer to the troubleshooting section or contact support. We're here to help ensure your migration is successful!
+
+**Welcome to the new WhatsApp Desktop!** 🎉

@@ -59,10 +59,14 @@ class CacheManager {
    * @param {string} sourceLang - 源语言
    * @param {string} targetLang - 目标语言
    * @param {string} engine - 引擎名称
+   * @param {string} accountId - 账号ID (可选，用于账号隔离)
    * @returns {string} 缓存键
    */
-  generateKey(text, sourceLang, targetLang, engine) {
-    const content = `${text}:${sourceLang}:${targetLang}:${engine}`;
+  generateKey(text, sourceLang, targetLang, engine, accountId = null) {
+    // Include accountId in cache key for per-account isolation
+    const content = accountId 
+      ? `${accountId}:${text}:${sourceLang}:${targetLang}:${engine}`
+      : `${text}:${sourceLang}:${targetLang}:${engine}`;
     return crypto.createHash('md5').update(content).digest('hex');
   }
 
@@ -126,8 +130,9 @@ class CacheManager {
    * 设置缓存
    * @param {string} key - 缓存键
    * @param {Object} value - 缓存值
+   * @param {string} accountId - 账号ID (可选，用于账号隔离)
    */
-  async set(key, value) {
+  async set(key, value, accountId = null) {
     // 设置内存缓存
     this.cache.set(key, value);
     this.stats.sets++;
@@ -141,6 +146,7 @@ class CacheManager {
       
       const data = {
         cache_key: key,
+        account_id: accountId, // Store accountId for per-account cache management
         translated_text: value.translatedText,
         source_lang: value.detectedLang || 'auto',
         target_lang: value.targetLang || 'unknown',
@@ -208,6 +214,73 @@ class CacheManager {
       console.log('All cache cleared');
     } catch (error) {
       console.error('Cache clear error:', error);
+    }
+  }
+
+  /**
+   * 清除特定账号的缓存
+   * @param {string} accountId - 账号ID
+   */
+  async clearByAccount(accountId) {
+    if (!accountId) {
+      throw new Error('Account ID is required to clear account cache');
+    }
+
+    console.log(`[CacheManager] Clearing cache for account ${accountId}`);
+    
+    // Clear from memory cache - need to iterate and remove matching keys
+    const keysToDelete = [];
+    for (const [key, value] of this.cache.entries()) {
+      // Check if this cache entry belongs to the account
+      // We need to check the file to get the accountId
+      if (this.cacheDir) {
+        try {
+          const cacheFile = path.join(this.cacheDir, `${key}.json`);
+          if (fs.existsSync(cacheFile)) {
+            const data = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+            if (data.account_id === accountId) {
+              keysToDelete.push(key);
+            }
+          }
+        } catch (error) {
+          // Ignore errors for individual files
+        }
+      }
+    }
+    
+    // Delete from memory cache
+    for (const key of keysToDelete) {
+      this.cache.delete(key);
+    }
+    
+    // Clear from file cache
+    if (!this.cacheDir) {
+      console.log(`[CacheManager] Cleared ${keysToDelete.length} memory cache entries for account ${accountId}`);
+      return;
+    }
+
+    try {
+      const files = fs.readdirSync(this.cacheDir);
+      let deletedCount = 0;
+      
+      for (const file of files) {
+        if (file.endsWith('.json')) {
+          const filePath = path.join(this.cacheDir, file);
+          try {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            if (data.account_id === accountId) {
+              fs.unlinkSync(filePath);
+              deletedCount++;
+            }
+          } catch (error) {
+            // Ignore errors for individual files
+          }
+        }
+      }
+      
+      console.log(`[CacheManager] Cleared ${deletedCount} file cache entries for account ${accountId}`);
+    } catch (error) {
+      console.error(`[CacheManager] Error clearing cache for account ${accountId}:`, error);
     }
   }
 

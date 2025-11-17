@@ -99,17 +99,24 @@ class TranslationManager extends EventEmitter {
     const maxRetries = 3;
     let currentEngine = engineName;
     let lastError = null;
+    
+    // Extract accountId from options for per-account cache isolation
+    const accountId = options.accountId || null;
 
     // 尝试使用指定引擎和降级引擎
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // 检查缓存 - 包含风格参数
+        // 检查缓存 - 包含风格参数和账号ID
         const styleKey = options.style || 'default';
-        const cacheKey = this.cacheManager.generateKey(cleanedText, sourceLang, targetLang, currentEngine) + `:${styleKey}`;
+        const cacheKey = this.cacheManager.generateKey(cleanedText, sourceLang, targetLang, currentEngine, accountId) + `:${styleKey}`;
         const cached = await this.cacheManager.get(cacheKey);
         
         if (cached) {
-          this.emit('cache-hit', { text: this.contentSecurity.truncateText(cleanedText, 50), engineName: currentEngine });
+          this.emit('cache-hit', { 
+            text: this.contentSecurity.truncateText(cleanedText, 50), 
+            engineName: currentEngine,
+            accountId 
+          });
           // 清理缓存的输出
           const safeCached = {
             ...cached,
@@ -137,8 +144,8 @@ class TranslationManager extends EventEmitter {
           translatedText: this.contentSecurity.cleanTranslationOutput(result.translatedText)
         };
       
-        // 缓存结果
-        await this.cacheManager.set(cacheKey, safeResult);
+        // 缓存结果 - 包含账号ID用于隔离
+        await this.cacheManager.set(cacheKey, safeResult, accountId);
         
         // 更新统计
         this.stats.successCount++;
@@ -149,7 +156,8 @@ class TranslationManager extends EventEmitter {
           text: this.contentSecurity.truncateText(cleanedText, 50), 
           engineName: currentEngine, 
           responseTime,
-          charCount: cleanedText.length 
+          charCount: cleanedText.length,
+          accountId
         });
 
         return { ...safeResult, cached: false, responseTime };
@@ -184,7 +192,8 @@ class TranslationManager extends EventEmitter {
     this.emit('translation-error', { 
       text: this.contentSecurity.truncateText(cleanedText, 50), 
       engineName, 
-      error: this.contentSecurity.sanitizeLogMessage(lastError.message)
+      error: this.contentSecurity.sanitizeLogMessage(lastError.message),
+      accountId
     });
     throw lastError;
   }

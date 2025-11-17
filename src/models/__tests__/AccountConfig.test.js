@@ -12,17 +12,24 @@ describe('AccountConfig', () => {
       
       expect(account.id).toBeDefined();
       expect(account.name).toBeDefined();
+      expect(account.note).toBe('');
+      expect(account.order).toBe(0);
       expect(account.createdAt).toBeInstanceOf(Date);
       expect(account.lastActiveAt).toBeInstanceOf(Date);
+      expect(account.autoStart).toBe(false);
+      expect(account.sessionDir).toBeDefined();
       expect(account.proxy).toBeDefined();
       expect(account.translation).toBeDefined();
-      expect(account.window).toBeDefined();
       expect(account.notifications).toBeDefined();
+      expect(account.window).toBeUndefined();
     });
 
     test('should create account with custom values', () => {
       const config = {
         name: 'Custom Account',
+        note: 'Test note',
+        order: 5,
+        autoStart: true,
         proxy: {
           enabled: true,
           protocol: 'socks5',
@@ -34,8 +41,28 @@ describe('AccountConfig', () => {
       const account = new AccountConfig(config);
       
       expect(account.name).toBe('Custom Account');
+      expect(account.note).toBe('Test note');
+      expect(account.order).toBe(5);
+      expect(account.autoStart).toBe(true);
       expect(account.proxy.enabled).toBe(true);
       expect(account.proxy.host).toBe('127.0.0.1');
+    });
+
+    test('should handle backward compatibility with window config', () => {
+      const config = {
+        name: 'Old Account',
+        window: {
+          x: 100,
+          y: 100,
+          width: 800,
+          height: 600
+        }
+      };
+      
+      const account = new AccountConfig(config);
+      
+      expect(account.name).toBe('Old Account');
+      expect(account.window).toBeUndefined();
     });
   });
 
@@ -334,14 +361,11 @@ describe('AccountConfig', () => {
     });
   });
 
-  describe('window configuration validation', () => {
-    test('should validate valid window configuration', () => {
+  describe('order and sessionDir validation', () => {
+    test('should validate valid order', () => {
       const account = new AccountConfig({
-        name: 'Valid Window',
-        window: {
-          width: 1200,
-          height: 800
-        }
+        name: 'Valid Order',
+        order: 5
       });
       
       const validation = account.validate();
@@ -349,34 +373,38 @@ describe('AccountConfig', () => {
       expect(validation.valid).toBe(true);
     });
 
-    test('should reject window width below minimum', () => {
+    test('should reject negative order', () => {
       const account = new AccountConfig({
-        name: 'Small Window',
-        window: {
-          width: 300,
-          height: 800
-        }
+        name: 'Negative Order',
+        order: -1
       });
       
       const validation = account.validate();
       
       expect(validation.valid).toBe(false);
-      expect(validation.errors).toContain('Window width must be at least 400 pixels');
+      expect(validation.errors).toContain('Order must be a non-negative number');
     });
 
-    test('should reject window height below minimum', () => {
+    test('should validate valid sessionDir', () => {
       const account = new AccountConfig({
-        name: 'Short Window',
-        window: {
-          width: 1200,
-          height: 200
-        }
+        name: 'Valid Session',
+        sessionDir: 'session-data/account-123'
       });
       
       const validation = account.validate();
       
-      expect(validation.valid).toBe(false);
-      expect(validation.errors).toContain('Window height must be at least 300 pixels');
+      expect(validation.valid).toBe(true);
+    });
+
+    test('should use default sessionDir when not provided', () => {
+      const account = new AccountConfig({
+        name: 'Default Session'
+      });
+      
+      const validation = account.validate();
+      
+      expect(validation.valid).toBe(true);
+      expect(account.sessionDir).toContain('session-data/account-');
     });
   });
 
@@ -384,6 +412,8 @@ describe('AccountConfig', () => {
     test('should detect multiple validation errors', () => {
       const account = new AccountConfig({
         name: '',
+        order: -1,
+        sessionDir: '',
         proxy: {
           enabled: true,
           protocol: 'invalid',
@@ -395,10 +425,6 @@ describe('AccountConfig', () => {
           targetLanguage: '',
           engine: 'invalid',
           apiKey: ''
-        },
-        window: {
-          width: 100,
-          height: 100
         }
       });
       
@@ -411,6 +437,10 @@ describe('AccountConfig', () => {
     test('should validate complex valid configuration', () => {
       const account = new AccountConfig({
         name: 'Complex Account',
+        note: 'Business account',
+        order: 1,
+        autoStart: true,
+        sessionDir: 'session-data/account-complex',
         proxy: {
           enabled: true,
           protocol: 'socks5',
@@ -426,12 +456,6 @@ describe('AccountConfig', () => {
           apiKey: 'sk-test-key',
           autoTranslate: true,
           translateInput: true
-        },
-        window: {
-          x: 100,
-          y: 100,
-          width: 1400,
-          height: 900
         },
         notifications: {
           enabled: true,
@@ -450,21 +474,31 @@ describe('AccountConfig', () => {
   describe('JSON serialization', () => {
     test('should serialize to JSON', () => {
       const account = new AccountConfig({
-        name: 'Test Account'
+        name: 'Test Account',
+        note: 'Test note',
+        order: 3
       });
       
       const json = account.toJSON();
       
       expect(json.id).toBe(account.id);
       expect(json.name).toBe('Test Account');
+      expect(json.note).toBe('Test note');
+      expect(json.order).toBe(3);
       expect(json.createdAt).toBeDefined();
+      expect(json.sessionDir).toBeDefined();
+      expect(json.autoStart).toBeDefined();
       expect(json.proxy).toBeDefined();
       expect(json.translation).toBeDefined();
+      expect(json.window).toBeUndefined();
     });
 
     test('should deserialize from JSON', () => {
       const originalAccount = new AccountConfig({
         name: 'Original Account',
+        note: 'Original note',
+        order: 2,
+        autoStart: true,
         proxy: {
           enabled: true,
           protocol: 'socks5',
@@ -478,6 +512,9 @@ describe('AccountConfig', () => {
       
       expect(restoredAccount.id).toBe(originalAccount.id);
       expect(restoredAccount.name).toBe(originalAccount.name);
+      expect(restoredAccount.note).toBe(originalAccount.note);
+      expect(restoredAccount.order).toBe(2);
+      expect(restoredAccount.autoStart).toBe(true);
       expect(restoredAccount.proxy.enabled).toBe(true);
       expect(restoredAccount.proxy.host).toBe('127.0.0.1');
     });

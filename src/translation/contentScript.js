@@ -408,6 +408,7 @@
         console.log(`[Translation] 🔄 聊天窗口翻译，使用引擎: ${engineName}（不使用风格）`);
         
         const response = await window.translationAPI.translate({
+          accountId: this.accountId,
           text: text,
           sourceLang: this.config.global.sourceLang || 'auto',
           targetLang: this.config.global.targetLang || 'zh-CN',
@@ -1488,6 +1489,7 @@
         console.log(`[Translation] 🎨 输入框翻译，使用引擎: ${inputBoxEngine}, 风格: ${inputBoxStyle}`);
         
         const response = await window.translationAPI.translate({
+          accountId: this.accountId,
           text: text,
           sourceLang: 'auto',
           targetLang: targetLang,
@@ -1592,6 +1594,7 @@
         // 执行反向翻译 - 翻译回原始语言（使用输入框引擎）
         const inputBoxEngine = this.config.inputBox.engine || this.config.global.engine;
         const response = await window.translationAPI.translate({
+          accountId: this.accountId,
           text: translatedText,
           sourceLang: targetLang,
           targetLang: sourceLang, // 翻译回原始语言
@@ -1847,6 +1850,7 @@
             const inputBoxStyle = this.config.inputBox.style || '通用';
             
             const response = await window.translationAPI.translate({
+              accountId: this.accountId,
               text: text,
               sourceLang: 'auto',
               targetLang: targetLang,
@@ -3745,6 +3749,7 @@
       
       try {
         const result = await window.translationAPI.translate({
+          accountId: this.accountId || window.WhatsAppTranslation.accountId,
           text: 'Hello, this is a test.',
           sourceLang: 'en',
           targetLang: 'zh-CN',
