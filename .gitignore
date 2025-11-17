@@ -4,6 +4,7 @@ package-lock.json
 
 # Session data (contains sensitive information)
 session-data/
+test-session-data/
 .wwebjs_auth/
 .wwebjs_cache/
 
