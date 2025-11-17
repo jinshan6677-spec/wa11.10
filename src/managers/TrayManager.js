@@ -190,15 +190,8 @@ class TrayManager {
   setupWindowEvents() {
     if (!this.mainWindow) return;
 
-    // 监听窗口最小化事件
-    this.mainWindow.on('minimize', (event) => {
-      if (this.minimizeToTray) {
-        event.preventDefault();
-        this.hideMainWindow();
-      }
-    });
-
     // 监听窗口关闭事件
+    // 注意：不再拦截 minimize 事件，让窗口正常最小化到任务栏
     this.mainWindow.on('close', (event) => {
       if (this.minimizeToTray && !app.isQuitting) {
         event.preventDefault();
