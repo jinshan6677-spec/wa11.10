@@ -1614,17 +1614,214 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
 
   /**
    * Toggle developer tools
+   * If there is an active account, open dev tools for that account's BrowserView
+   * Otherwise, open dev tools for the main window
    * Handler: toggle-dev-tools
    */
-  ipcMain.on('toggle-dev-tools', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isDevToolsWindowOpen()) {
-        mainWindow.closeDevToolsWindow();
-      } else {
-        mainWindow.openDeveloperToolsInDetachedWindow();
+  ipcMain.handle('toggle-dev-tools', async () => {
+    console.log('[DEBUG] 开始处理F12开发者工具切换');
+    
+    try {
+      // Check if ViewManager is available
+      if (!viewManager || !mainWindow || mainWindow.isDestroyed()) {
+        console.log('[DEBUG] ViewManager或主窗口不可用，直接使用主窗口开发者工具');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.toggleDeveloperTools();
+          return { success: true, target: 'main-window' };
+        }
+        return { success: false, error: 'ViewManager or main window not available' };
       }
+      
+      // Check if there's an active account first
+      let activeAccountId = viewManager.getActiveAccountId();
+      console.log('[DEBUG] 当前活跃账号ID:', activeAccountId);
+      
+      // If no active account, try to get one from accounts and activate it
+      if (!activeAccountId) {
+        console.log('[DEBUG] ❌ 没有活跃账号，尝试获取第一个账号');
+        
+        if (accountManager) {
+          try {
+            const accounts = await accountManager.getAccountsSorted();
+            console.log('[DEBUG] 可用账号数量:', accounts ? accounts.length : 0);
+            
+            if (accounts && accounts.length > 0) {
+              const firstAccount = accounts[0];
+              activeAccountId = firstAccount.id;
+              console.log('[DEBUG] 👤 使用第一个账号:', activeAccountId, firstAccount.name);
+              
+              // Switch to this account to make it active
+              console.log('[DEBUG] 🔄 正在切换到第一个账号...');
+              const switchResult = await viewManager.switchView(activeAccountId, {
+                createIfMissing: true,
+                viewConfig: {
+                  url: 'https://web.whatsapp.com'
+                }
+              });
+              
+              console.log('[DEBUG] 切换账号结果:', switchResult);
+              
+              if (switchResult && switchResult.success) {
+                console.log(`[DEBUG] ✅ 成功切换到账号 ${activeAccountId}`);
+                
+                // 等待一小段时间确保视图状态更新完成
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // Update activeAccountId after successful switch
+                const newActiveId = viewManager.getActiveAccountId();
+                console.log('[DEBUG] 🔄 更新后的活跃账号ID:', newActiveId);
+                
+                // 如果还是没有活跃ID，尝试手动设置
+                if (!newActiveId) {
+                  console.log('[DEBUG] ⚠️ 尝试手动设置活跃账号ID');
+                  activeAccountId = viewManager.showView ? null : firstAccount.id;
+                } else {
+                  activeAccountId = newActiveId;
+                }
+              } else {
+                console.log('[DEBUG] ❌ 切换账号失败:', switchResult ? switchResult.error : 'Unknown error');
+                
+                // 如果切换失败，尝试直接使用第一个账户ID
+                if (!activeAccountId) {
+                  activeAccountId = firstAccount.id;
+                  console.log('[DEBUG] 🔧 强制使用第一个账号ID:', activeAccountId);
+                }
+              }
+            } else {
+              console.log('[DEBUG] ⚠️ 没有可用账号');
+            }
+          } catch (accountError) {
+            console.error('[DEBUG] ❌ 获取账号列表失败:', accountError);
+          }
+        } else {
+          console.log('[DEBUG] ❌ AccountManager不可用');
+        }
+      } else {
+        console.log('[DEBUG] ✅ 已找到活跃账号ID:', activeAccountId);
+      }
+      
+      // Check if we have an active account now
+      if (activeAccountId) {
+        console.log('[DEBUG] ✅ 使用活跃账号ID:', activeAccountId);
+        
+        // There's an active account, open dev tools for its BrowserView
+        const viewState = viewManager.getViewState(activeAccountId);
+        console.log('[DEBUG] 视图状态:', viewState);
+        
+        if (viewState && viewState.view) {
+          console.log('[DEBUG] 找到视图状态，视图信息:', {
+            accountId: activeAccountId,
+            hasView: !!viewState.view,
+            hasWebContents: !!viewState.view.webContents,
+            isDestroyed: viewState.view.webContents.isDestroyed(),
+            devToolsOpened: viewState.view.webContents.isDevToolsOpened()
+          });
+          
+          if (viewState.view.webContents.isDestroyed()) {
+            console.log('[DEBUG] 视图的WebContents已销毁，无法打开开发者工具');
+            return { success: false, error: 'View webContents destroyed' };
+          }
+          
+          if (viewState.view.webContents.isDevToolsOpened()) {
+            viewState.view.webContents.closeDevTools();
+            console.log(`[DEBUG] 关闭账号 ${activeAccountId} 的开发者工具`);
+            return { success: true, accountId: activeAccountId, isOpen: false };
+          } else {
+            console.log(`[DEBUG] 🛠️ 准备为账号 ${activeAccountId} 打开开发者工具...`);
+            viewState.view.webContents.openDevTools({
+              mode: 'detach',
+              activate: true
+            });
+            console.log(`[DEBUG] ✅ 已为账号 ${activeAccountId} 打开开发者工具`);
+            
+            // 验证开发者工具是否成功打开
+            setTimeout(() => {
+              const isOpen = viewState.view.webContents.isDevToolsOpened();
+              console.log(`[DEBUG] 开发者工具打开状态验证: ${isOpen ? '✅ 成功' : '❌ 失败'}`);
+            }, 100);
+            
+            return { success: true, accountId: activeAccountId, isOpen: true };
+          }
+        } else {
+          console.log('[DEBUG] ❌ 未找到视图状态或视图');
+          if (!viewState) {
+            console.log('[DEBUG] 视图状态不存在 - 尝试重新创建视图');
+            // 尝试创建视图
+            try {
+              await viewManager.createView(activeAccountId, {
+                url: 'https://web.whatsapp.com'
+              });
+              console.log('[DEBUG] ✅ 重新创建视图成功');
+              // 重新获取视图状态
+              const newViewState = viewManager.getViewState(activeAccountId);
+              if (newViewState && newViewState.view) {
+                newViewState.view.webContents.openDevTools({
+                  mode: 'detach',
+                  activate: true
+                });
+                return { success: true, accountId: activeAccountId, isOpen: true, created: true };
+              }
+            } catch (createError) {
+              console.error('[DEBUG] 创建视图失败:', createError);
+            }
+          } else if (!viewState.view) {
+            console.log('[DEBUG] 视图对象不存在');
+          }
+        }
+      } else {
+        console.log('[DEBUG] ⚠️ 没有可用账号，回退到主窗口');
+        
+        // 最后尝试：使用第一个可用账号
+        if (accountManager) {
+          try {
+            const accounts = await accountManager.getAccountsSorted();
+            if (accounts && accounts.length > 0) {
+              const fallbackAccount = accounts[0];
+              console.log('[DEBUG] 🔄 回退方案：使用第一个可用账号', fallbackAccount.id);
+              
+              // 尝试为这个账号创建视图并打开开发者工具
+              const createResult = await viewManager.createView(fallbackAccount.id, {
+                url: 'https://web.whatsapp.com'
+              });
+              
+              if (createResult) {
+                // 等待视图创建完成
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const viewState = viewManager.getViewState(fallbackAccount.id);
+                if (viewState && viewState.view) {
+                  viewState.view.webContents.openDevTools({
+                    mode: 'detach',
+                    activate: true
+                  });
+                  console.log('[DEBUG] ✅ 回退方案成功：为账号打开开发者工具');
+                  return { success: true, accountId: fallbackAccount.id, isOpen: true, fallback: true };
+                }
+              }
+            }
+          } catch (fallbackError) {
+            console.error('[DEBUG] 回退方案失败:', fallbackError);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('切换开发者工具时出错:', error);
+      console.error('错误堆栈:', error.stack);
     }
+    
+    // Fallback to main window dev tools
+    console.log('[DEBUG] 回退到主窗口开发者工具');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.toggleDeveloperTools();
+      console.log('主窗口开发者工具切换完成');
+      return { success: true, target: 'main-window' };
+    }
+    
+    return { success: false, error: 'No suitable target found' };
   });
+
+  
 
   /**
    * Get developer tools status

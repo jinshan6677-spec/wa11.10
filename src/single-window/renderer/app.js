@@ -165,6 +165,28 @@
    */
   function setupKeyboardShortcuts() {
     document.addEventListener('keydown', async (e) => {
+      // F12 快捷键切换开发者工具
+      if (e.key === 'F12' && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        
+        console.log('🔧 F12键被按下！开始切换开发者工具...');
+        console.log('🔍 检查electronAPI是否可用:', !!window.electronAPI);
+        
+        try {
+          if (window.electronAPI) {
+            console.log('📡 调用electronAPI.toggleDeveloperTools()...');
+            const result = await window.electronAPI.toggleDeveloperTools();
+            console.log('📋 F12操作结果:', result);
+          } else {
+            console.error('❌ window.electronAPI 不可用！');
+          }
+        } catch (error) {
+          console.error('❌ 切换开发者工具时出错:', error);
+          console.error('❌ 错误堆栈:', error.stack);
+        }
+        return;
+      }
+      
       // Check for Ctrl+Number (1-9) shortcuts
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         const key = e.key;

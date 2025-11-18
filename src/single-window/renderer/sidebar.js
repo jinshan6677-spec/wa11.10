@@ -437,11 +437,6 @@
   /**
    * Handle edit account button click
    */
-  function handleEditAccount(accountId) {
-    if (window.electronAPI) {
-      window.electronAPI.send('account:edit', accountId);
-    }
-  }
 
   /**
    * Handle delete account button click

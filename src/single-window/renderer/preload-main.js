@@ -455,7 +455,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'recovery:stop-monitor',
       'recovery:get-status',
       'recovery:get-all-status',
-      'recovery:retry-operation'
+      'recovery:retry-operation',
+      'get-dev-tools-status'
     ];
 
     if (validChannels.includes(channel)) {
@@ -479,7 +480,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'account:edit',
       'sidebar-resized',
       'window-resize-complete',
-      'ui-ready'
+      'ui-ready',
+      'toggle-dev-tools'
     ];
 
     if (validChannels.includes(channel)) {
@@ -644,6 +646,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('error-cleared', listener);
     return () => ipcRenderer.removeListener('error-cleared', listener);
   },
+
+  // ============================================================================
+  // Developer Tools Methods
+  // ============================================================================
+
+  /**
+   * Toggle developer tools
+   * Uses Electron's native dev tools in detached mode
+   */
+  toggleDeveloperTools: () => {
+    return ipcRenderer.invoke('toggle-dev-tools');
+  },
+
+  /**
+   * Check if developer tools are currently open
+   * @returns {Promise<{success: boolean, isOpen?: boolean, error?: string}>}
+   */
+  getDeveloperToolsStatus: () => {
+    return ipcRenderer.invoke('get-dev-tools-status');
+  },
+
+  
+
+  // ============================================================================
+  // Error Handling Methods
+  // ============================================================================
 
   /**
    * Listen for account creation error events
