@@ -224,10 +224,8 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
       }
 
       // Notify renderer to update account list
-      mainWindow.sendToRenderer('account:list-updated', {
-        action: 'created',
-        accountId: result.account.id
-      });
+      const updatedAccounts = await accountManager.loadAccounts();
+      mainWindow.sendToRenderer('accounts-updated', updatedAccounts.map(acc => acc.toJSON()));
 
       return {
         success: true,
@@ -318,10 +316,8 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
       }
 
       // Notify renderer to update account list
-      mainWindow.sendToRenderer('account:list-updated', {
-        action: 'updated',
-        accountId
-      });
+      const updatedAccounts = await accountManager.loadAccounts();
+      mainWindow.sendToRenderer('accounts-updated', updatedAccounts.map(acc => acc.toJSON()));
 
       return {
         success: true,
@@ -395,10 +391,8 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
       }
 
       // Notify renderer to update account list
-      mainWindow.sendToRenderer('account:list-updated', {
-        action: 'deleted',
-        accountId
-      });
+      const updatedAccounts = await accountManager.loadAccounts();
+      mainWindow.sendToRenderer('accounts-updated', updatedAccounts.map(acc => acc.toJSON()));
 
       return {
         success: true
@@ -636,9 +630,8 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
       }
 
       // Notify renderer to update account list
-      mainWindow.sendToRenderer('account:list-updated', {
-        action: 'reordered'
-      });
+      const updatedAccounts = await accountManager.loadAccounts();
+      mainWindow.sendToRenderer('accounts-updated', updatedAccounts.map(acc => acc.toJSON()));
 
       return {
         success: true
