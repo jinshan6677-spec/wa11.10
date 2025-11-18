@@ -12,6 +12,8 @@ class CustomAPIAdapter extends AITranslationAdapter {
       name: config.name || 'Custom API',
       type: 'custom'
     });
+    
+    console.log(`[CustomAPIAdapter] 初始化完成 - 名称: ${this.name}, API端点: ${this.apiEndpoint}, 模型: ${this.model}`);
   }
 
   /**

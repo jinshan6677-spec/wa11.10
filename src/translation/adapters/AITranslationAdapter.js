@@ -44,11 +44,16 @@ class AITranslationAdapter extends TranslationAdapter {
       console.log('[AITranslation] 收到的 options:', JSON.stringify(options));
       const style = options.style || '通用';
       console.log(`[AITranslation] 最终使用风格: ${style}`);
+      console.log(`[AITranslation] API端点: ${this.apiEndpoint}`);
+      console.log(`[AITranslation] 模型: ${this.model}`);
+      
       const prompt = this.buildPrompt(text, source, target, style);
       
       // 调试：显示提示词预览（仅在非通用风格时显示）
       if (style !== '通用') {
-        console.log(`[AITranslation] 提示词预览: ${prompt.substring(0, 200)}...`);
+        console.log(`[AITranslation] 提示词预览: ${prompt.substring(0, 300)}...`);
+      } else {
+        console.log(`[AITranslation] 提示词预览（通用风格）: ${prompt.substring(0, 200)}...`);
       }
 
       // 调用 AI API

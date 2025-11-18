@@ -126,6 +126,13 @@ class TranslationService {
 
     // 自定义 API
     if (engineConfigs.custom && engineConfigs.custom.enabled) {
+      console.log('[TranslationService] Custom API 配置:', {
+        name: engineConfigs.custom.name,
+        endpoint: engineConfigs.custom.endpoint,
+        model: engineConfigs.custom.model,
+        hasApiKey: !!engineConfigs.custom.apiKey
+      });
+      
       const customAdapter = new CustomAPIAdapter({
         name: engineConfigs.custom.name || 'Custom API',
         type: 'custom',
@@ -136,6 +143,8 @@ class TranslationService {
       });
       this.translationManager.registerEngine('custom', customAdapter);
       console.log('[TranslationService] Registered Custom API');
+    } else {
+      console.log('[TranslationService] Custom API 未启用或配置缺失');
     }
   }
 

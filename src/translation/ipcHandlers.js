@@ -33,12 +33,28 @@ async function registerIPCHandlers() {
       // Get account-specific translation config
       const accountConfig = translationService.getConfig(accountId);
       
-      // Merge account config with request options
+      console.log('[IPC] Translation request received:', {
+        accountId,
+        engineName,
+        sourceLang,
+        targetLang,
+        hasOptions: !!options,
+        optionsStyle: options?.style,
+        accountInputBoxStyle: accountConfig.inputBox?.style
+      });
+      
+      // Merge account config with request options (preserve style from options)
       const mergedOptions = {
-        ...options,
         accountId, // Include accountId in options for cache key generation
-        ...accountConfig
+        ...accountConfig,
+        ...options // options should override account config (especially style)
       };
+      
+      console.log('[IPC] Merged options:', {
+        style: mergedOptions.style,
+        inputBox: mergedOptions.inputBox,
+        engine: mergedOptions.engine
+      });
       
       // Use account-specific engine if not specified
       const effectiveEngine = engineName || accountConfig.engine || 'google';
