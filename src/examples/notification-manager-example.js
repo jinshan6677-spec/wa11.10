@@ -2,18 +2,17 @@
  * NotificationManager 使用示例
  * 
  * 演示如何使用 NotificationManager 管理系统通知和未读消息检测
+ * 适用于单窗口架构
  */
 
 const { app, BrowserWindow } = require('electron');
 const NotificationManager = require('../managers/NotificationManager');
-const InstanceManager = require('../managers/InstanceManager');
-const AccountConfigManager = require('../managers/AccountConfigManager');
-const MainApplicationWindow = require('../container/MainApplicationWindow');
+const MainWindow = require('../single-window/MainWindow');
 
 // 示例：初始化通知管理器
 async function initializeNotificationManager() {
   // 创建主窗口
-  const mainWindow = new MainApplicationWindow();
+  const mainWindow = new MainWindow();
   mainWindow.initialize();
   
   // 创建通知管理器

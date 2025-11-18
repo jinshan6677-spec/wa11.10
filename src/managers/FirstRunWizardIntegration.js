@@ -1,26 +1,26 @@
 /**
- * FirstRunWizardIntegration - 首次启动向导集成模块
+ * FirstRunWizardIntegration - 首次启动迁移集成模块
  * 
- * 提供简单的 API 来集成首次启动向导到应用启动流程
+ * 提供简单的 API 来处理从容器模式到单窗口模式的迁移
+ * 由于容器模式已移除，此模块主要处理自动迁移功能
  */
 
-const FirstRunWizard = require('../container/FirstRunWizard');
 const MigrationManager = require('./MigrationManager');
 const AccountConfigManager = require('./AccountConfigManager');
 
 /**
- * 检查并显示首次启动向导
+ * 执行迁移检查和自动迁移
  * @param {Object} options - 配置选项
  * @param {string} options.userDataPath - 用户数据路径
+ * @param {boolean} options.autoMigrate - 是否自动执行迁移
  * @param {Function} options.onComplete - 完成回调
- * @param {Function} options.onSkip - 跳过回调
- * @returns {Promise<{shown: boolean, migrated: boolean, result?: Object}>}
+ * @returns {Promise<{migrationNeeded: boolean, migrated: boolean, result?: Object}>}
  */
-async function checkAndShowWizard(options) {
+async function checkAndMigrate(options) {
   const {
     userDataPath,
-    onComplete = () => {},
-    onSkip = () => {}
+    autoMigrate = true,
+    onComplete = () => {}
   } = options;
 
   if (!userDataPath) {
@@ -43,47 +43,47 @@ async function checkAndShowWizard(options) {
     const needsMigration = await migrationManager.needsMigration();
 
     if (!needsMigration) {
-      console.log('[FirstRunWizard] No migration needed, skipping wizard');
+      console.log('[MigrationIntegration] No migration needed');
       return {
-        shown: false,
+        migrationNeeded: false,
         migrated: false
       };
     }
 
-    console.log('[FirstRunWizard] Migration needed, showing wizard');
+    console.log('[MigrationIntegration] Migration needed, checking autoMigrate setting...');
 
-    // 创建并显示向导
-    const wizard = new FirstRunWizard({
-      migrationManager,
-      onComplete: () => {
-        console.log('[FirstRunWizard] Wizard completed');
-        onComplete();
-      },
-      onSkip: () => {
-        console.log('[FirstRunWizard] Wizard skipped');
-        onSkip();
-      }
-    });
+    if (!autoMigrate) {
+      return {
+        migrationNeeded: true,
+        migrated: false
+      };
+    }
 
-    // 注册 IPC 处理器
-    wizard.registerHandlers();
+    console.log('[MigrationIntegration] Starting automatic migration...');
 
-    // 显示向导
-    await wizard.show();
+    // 执行迁移
+    const result = await migrationManager.migrate();
+
+    if (result.success) {
+      console.log('[MigrationIntegration] Migration completed successfully');
+      onComplete();
+    } else {
+      console.error('[MigrationIntegration] Migration failed:', result.message);
+    }
 
     return {
-      shown: true,
-      migrated: false, // 迁移将在用户点击按钮后执行
-      wizard
+      migrationNeeded: true,
+      migrated: result.success,
+      result
     };
   } catch (error) {
-    console.error('[FirstRunWizard] Error showing wizard:', error);
+    console.error('[MigrationIntegration] Error during migration:', error);
     throw error;
   }
 }
 
 /**
- * 自动执行迁移（不显示向导）
+ * 自动执行迁移（静默模式）
  * @param {Object} options - 配置选项
  * @param {string} options.userDataPath - 用户数据路径
  * @param {boolean} options.silent - 是否静默执行
@@ -116,15 +116,15 @@ async function autoMigrate(options) {
 
     if (!needsMigration) {
       if (!silent) {
-        console.log('[FirstRunWizard] No migration needed');
-      }
+      console.log('[MigrationIntegration] No migration needed');
+    }
       return {
         migrated: false
       };
     }
 
     if (!silent) {
-      console.log('[FirstRunWizard] Starting automatic migration...');
+      console.log('[MigrationIntegration] Starting automatic migration...');
     }
 
     // 执行迁移
@@ -132,9 +132,9 @@ async function autoMigrate(options) {
 
     if (!silent) {
       if (result.success) {
-        console.log('[FirstRunWizard] Migration completed successfully');
+        console.log('[MigrationIntegration] Migration completed successfully');
       } else {
-        console.error('[FirstRunWizard] Migration failed:', result.message);
+        console.error('[MigrationIntegration] Migration failed:', result.message);
       }
     }
 
@@ -143,7 +143,7 @@ async function autoMigrate(options) {
       result
     };
   } catch (error) {
-    console.error('[FirstRunWizard] Error during auto migration:', error);
+    console.error('[MigrationIntegration] Error during auto migration:', error);
     throw error;
   }
 }
@@ -170,13 +170,13 @@ async function getMigrationStatus(userDataPath) {
 
     return await migrationManager.getMigrationStatus();
   } catch (error) {
-    console.error('[FirstRunWizard] Error getting migration status:', error);
+    console.error('[MigrationIntegration] Error getting migration status:', error);
     throw error;
   }
 }
 
 module.exports = {
-  checkAndShowWizard,
+  checkAndMigrate,
   autoMigrate,
   getMigrationStatus
 };
