@@ -489,6 +489,22 @@ app.whenReady().then(async () => {
     // 2. 初始化所有管理器
     await initializeManagers();
 
+    // 设置开发者工具快捷键监听（如果环境支持）
+    if (mainWindow && mainWindow.isReady()) {
+      log('info', '=== 开发者工具快捷键已启用 ===');
+      log('info', '按 F12 或 Ctrl+Shift+I (Windows/Linux) / Cmd+Opt+I (macOS) 切换开发者工具');
+      
+      // 在开发模式下主动提示
+      if (process.env.NODE_ENV === 'development') {
+        log('info', '=== 开发模式已启用 ===');
+        log('info', '独立开发者工具窗口将自动在屏幕右侧打开');
+        log('info', '这是一个完全独立的窗口，不会被WhatsApp界面覆盖');
+        log('info', '请查看屏幕右侧名为"WhatsApp Desktop - 开发者控制台"的窗口');
+        log('info', '按 F12 可以关闭/重新打开开发者工具窗口');
+        log('info', '此窗口显示所有应用日志和错误信息');
+      }
+    }
+
     // 3. 执行自动数据清理
     await performOrphanedDataCleanup();
 
@@ -500,9 +516,7 @@ app.whenReady().then(async () => {
       const accounts = await accountConfigManager.loadAccounts();
       
       // 发送账号列表到渲染进程
-      mainWindow.sendToRenderer('accounts-loaded', {
-        accounts: accounts.map(acc => acc.toJSON())
-      });
+      mainWindow.sendToRenderer('accounts-updated', accounts.map(acc => acc.toJSON()));
       
       log('info', `加载了 ${accounts.length} 个账号配置`);
     } catch (error) {

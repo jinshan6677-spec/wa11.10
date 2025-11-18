@@ -475,6 +475,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Whitelist of allowed send channels
     const validChannels = [
       'account:create',
+      'account:create-direct',
       'account:edit',
       'sidebar-resized',
       'window-resize-complete',
@@ -641,6 +642,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('error-cleared', listener);
     return () => ipcRenderer.removeListener('error-cleared', listener);
+  },
+
+  /**
+   * Listen for account creation error events
+   * @param {Function} callback - Callback function (data) => void
+   * @returns {Function} Cleanup function to remove listener
+   */
+  onAccountCreationError: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('account-creation-error', listener);
+    return () => ipcRenderer.removeListener('account-creation-error', listener);
   }
 });
 

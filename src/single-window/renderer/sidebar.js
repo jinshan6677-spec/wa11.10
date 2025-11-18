@@ -37,50 +37,76 @@
     }
 
     // Listen for account updates from main process
-    if (window.electronAPI) {
-      window.electronAPI.on('accounts-updated', handleAccountsUpdated);
-      window.electronAPI.on('account-switched', handleAccountSwitched);
-      window.electronAPI.on('account-status-changed', handleAccountStatusChanged);
-      window.electronAPI.on('account:active-changed', handleActiveAccountChanged);
-      
-      // Listen for view manager events
-      window.electronAPI.on('view-manager:view-loading', handleViewLoading);
-      window.electronAPI.on('view-manager:view-ready', handleViewReady);
-      window.electronAPI.on('view-manager:view-error', handleViewError);
-      window.electronAPI.on('view-manager:login-status-changed', handleLoginStatusChanged);
-      window.electronAPI.on('view-manager:view-crashed', handleViewCrashed);
-      window.electronAPI.on('view-manager:connection-status-changed', handleConnectionStatusChanged);
-    }
+  if (window.electronAPI) {
+    window.electronAPI.on('accounts-updated', handleAccountsUpdated);
+    window.electronAPI.on('account-switched', handleAccountSwitched);
+    window.electronAPI.on('account-status-changed', handleAccountStatusChanged);
+    window.electronAPI.on('account:active-changed', handleActiveAccountChanged);
+    
+    // Listen for account creation errors
+    window.electronAPI.onAccountCreationError(handleAccountCreationError);
+    
+    // Listen for view manager events
+    window.electronAPI.on('view-manager:view-loading', handleViewLoading);
+    window.electronAPI.on('view-manager:view-ready', handleViewReady);
+    window.electronAPI.on('view-manager:view-error', handleViewError);
+    window.electronAPI.on('view-manager:login-status-changed', handleLoginStatusChanged);
+    window.electronAPI.on('view-manager:view-crashed', handleViewCrashed);
+    window.electronAPI.on('view-manager:connection-status-changed', handleConnectionStatusChanged);
+  }
   }
 
   /**
    * Load accounts from main process
    */
   async function loadAccounts() {
+    console.log('[Sidebar] Loading accounts...');
+    
     try {
       if (window.electronAPI) {
+        console.log('[Sidebar] electronAPI available, calling get-accounts...');
         const accountsData = await window.electronAPI.invoke('get-accounts');
+        console.log('[Sidebar] Received accounts data:', accountsData);
+        
         accounts = accountsData || [];
+        console.log('[Sidebar] Loaded accounts:', accounts.length);
         
         // Get active account
+        console.log('[Sidebar] Getting active account...');
         const activeResult = await window.electronAPI.invoke('account:get-active');
+        console.log('[Sidebar] Active account result:', activeResult);
+        
         if (activeResult && activeResult.success && activeResult.accountId) {
           activeAccountId = activeResult.accountId;
         }
         
+        console.log('[Sidebar] Initial render after loadAccounts');
         renderAccountList();
+      } else {
+        console.error('[Sidebar] electronAPI not available');
       }
     } catch (error) {
-      console.error('Failed to load accounts:', error);
-      showError('加载账号失败');
+      console.error('[Sidebar] Failed to load accounts:', error);
+      showError('加载账号失败: ' + error.message);
     }
   }
 
   /**
    * Render the account list
-   * OPTIMIZED: Uses document fragment for batch DOM updates
+   * OPTIMIZED: Uses document fragments and batch DOM updates
    */
   function renderAccountList() {
+    console.log('[Sidebar] renderAccountList() called, accounts length:', accounts.length);
+    
+    if (!accountList) {
+      console.error('[Sidebar] Account list element not found');
+      return;
+    }
+    
+    if (!emptyState) {
+      console.error('[Sidebar] Empty state element not found');
+      return;
+    }
     // Clear existing items (except empty state)
     const existingItems = accountList.querySelectorAll('.account-item');
     existingItems.forEach(item => item.remove());
@@ -104,6 +130,9 @@
       return orderA - orderB;
     });
 
+    // Clear existing content
+    accountList.innerHTML = '';
+
     // OPTIMIZATION: Use document fragment for batch DOM updates
     // This reduces reflows and improves performance with many accounts
     const fragment = document.createDocumentFragment();
@@ -116,6 +145,8 @@
 
     // Single DOM update
     accountList.appendChild(fragment);
+    
+    console.log('[Sidebar] DOM updated, accounts rendered:', sortedAccounts.length);
   }
 
   /**
@@ -329,8 +360,48 @@
    * Handle add account button click
    */
   function handleAddAccount() {
+    console.log('[Sidebar] Add account button clicked');
+    console.log('[Sidebar] window.electronAPI available:', !!window.electronAPI);
+    
     if (window.electronAPI) {
-      window.electronAPI.send('account:create');
+      console.log('[Sidebar] Testing electronAPI.send method:', typeof window.electronAPI.send);
+      console.log('[Sidebar] Testing electronAPI.createAccount method:', typeof window.electronAPI.createAccount);
+      
+      // 首先尝试直接创建账号
+      try {
+        console.log('[Sidebar] Trying direct account creation via send...');
+        window.electronAPI.send('account:create-direct');
+        console.log('[Sidebar] Direct send successful');
+      } catch (sendError) {
+        console.error('[Sidebar] Direct send failed:', sendError);
+        
+        // 如果send失败，尝试使用createAccount方法
+        try {
+          console.log('[Sidebar] Trying createAccount method...');
+          window.electronAPI.createAccount({
+            name: '新账号' + Date.now(),
+            note: '快速创建的账号'
+          }).then(result => {
+            console.log('[Sidebar] createAccount result:', result);
+          }).catch(error => {
+            console.error('[Sidebar] createAccount failed:', error);
+          });
+        } catch (createError) {
+          console.error('[Sidebar] createAccount failed:', createError);
+          
+          // 如果都失败，回退到对话框方式
+          console.log('[Sidebar] Falling back to dialog creation...');
+          try {
+            window.electronAPI.openCreateAccountDialog();
+          } catch (dialogError) {
+            console.error('[Sidebar] Dialog creation also failed:', dialogError);
+            showError('所有创建账号的方法都失败了，请检查应用状态');
+          }
+        }
+      }
+    } else {
+      console.error('[Sidebar] electronAPI not available, falling back to alert');
+      showError('electronAPI 不可用，无法创建账号');
     }
   }
 
@@ -373,7 +444,10 @@
    * OPTIMIZED: Debounces rapid updates to avoid excessive re-renders
    */
   function handleAccountsUpdated(accountsData) {
+    console.log('[Sidebar] Received accounts-updated event, data:', accountsData);
+    
     accounts = accountsData || [];
+    console.log('[Sidebar] Updated accounts array:', accounts.length, 'accounts');
     
     // OPTIMIZATION: Debounce rapid account list updates
     if (updateTimers.has('accountList')) {
@@ -381,6 +455,7 @@
     }
     
     updateTimers.set('accountList', setTimeout(() => {
+      console.log('[Sidebar] Calling renderAccountList()');
       renderAccountList();
       updateTimers.delete('accountList');
     }, DEBOUNCE_DELAY));
@@ -637,6 +712,14 @@
     // Simple error display - could be enhanced with a toast/notification system
     console.error(message);
     alert(message);
+  }
+
+  /**
+   * Handle account creation error
+   */
+  function handleAccountCreationError(data) {
+    console.error('[Sidebar] Account creation failed:', data);
+    showError(`创建账号失败: ${data.message || '未知错误'}`);
   }
 
   // Initialize when DOM is ready

@@ -61,8 +61,10 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
    * Handler: get-accounts
    */
   ipcMain.handle('get-accounts', async () => {
+    console.log('[IPC] get-accounts handler called');
     try {
       const accounts = await accountManager.getAccountsSorted();
+      console.log('[IPC] get-accounts returned:', accounts.length, 'accounts');
       return accounts.map(account => account.toJSON());
     } catch (error) {
       console.error('[IPC] Failed to get accounts:', error);
@@ -114,6 +116,84 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
   ipcMain.on('account:create', () => {
     openAccountDialog(null);
   });
+
+  ipcMain.on('account:create-direct', async () => {
+    try {
+      console.log('[IPC] Starting direct account creation...');
+      console.log('[IPC] accountManager available:', !!accountManager);
+      
+      // Generate unique default name based on existing accounts
+      const existingAccounts = await accountManager.getAccountsSorted();
+      console.log('[IPC] Existing accounts count:', existingAccounts.length);
+      
+      let defaultName = '新账号';
+      let counter = 1;
+      
+      while (existingAccounts.some(acc => acc.name.toLowerCase() === defaultName.toLowerCase())) {
+        counter++;
+        defaultName = `新账号${counter}`;
+      }
+      
+      console.log('[IPC] Generated account name:', defaultName);
+      
+      // Create account with default configuration
+      const result = await accountManager.createAccount({
+        name: defaultName,
+        note: '自动创建的账号',
+        proxy: {
+          enabled: false,
+          protocol: 'socks5',
+          host: '',
+          port: 0,
+          username: '',
+          password: ''
+        },
+        translation: {
+          enabled: false,
+          targetLanguage: 'zh-CN',
+          engine: 'google',
+          apiKey: '',
+          autoTranslate: false,
+          translateInput: false,
+          friendSettings: {}
+        },
+        notifications: {
+          enabled: true,
+          sound: true,
+          badge: true
+        }
+      });
+
+      console.log('[IPC] Account creation result:', result);
+
+      if (result.success) {
+        console.log('[IPC] Account created successfully, ID:', result.account.id);
+        
+        // Refresh account list in all windows
+        const accounts = await accountManager.getAccountsSorted();
+        const accountsData = accounts.map(account => account.toJSON());
+        console.log('[IPC] Sending accounts-updated with', accountsData.length, 'accounts');
+        mainWindow.getWindow().webContents.send('accounts-updated', accountsData);
+        
+        console.log('[IPC] Direct account creation successful:', result.account.id);
+      } else {
+        console.error('[IPC] Failed to create account directly:', result.errors);
+        mainWindow.getWindow().webContents.send('account-creation-error', {
+          message: '创建账号失败',
+          errors: result.errors
+        });
+      }
+    } catch (error) {
+      console.error('[IPC] Error in direct account creation:', error);
+      console.error('[IPC] Error stack:', error.stack);
+      mainWindow.getWindow().webContents.send('account-creation-error', {
+        message: '创建账号时发生错误',
+        errors: [error.message]
+      });
+    }
+  });
+
+  
 
   ipcMain.on('account:edit', (event, accountId) => {
     openAccountDialog(accountId);
@@ -1519,6 +1599,37 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
     }
   });
 
+  /**
+   * Toggle developer tools
+   * Handler: toggle-dev-tools
+   */
+  ipcMain.on('toggle-dev-tools', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isDevToolsWindowOpen()) {
+        mainWindow.closeDevToolsWindow();
+      } else {
+        mainWindow.openDeveloperToolsInDetachedWindow();
+      }
+    }
+  });
+
+  /**
+   * Get developer tools status
+   * Handler: get-dev-tools-status
+   */
+  ipcMain.handle('get-dev-tools-status', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      return {
+        success: true,
+        isOpen: mainWindow.isDevToolsOpened()
+      };
+    }
+    return {
+      success: false,
+      error: 'Main window not available'
+    };
+  });
+
   console.log('[IPC] Single-window handlers registered');
 }
 
@@ -1568,6 +1679,8 @@ function unregisterIPCHandlers() {
   ipcMain.removeAllListeners('account:edit');
   ipcMain.removeAllListeners('sidebar-resized');
   ipcMain.removeAllListeners('window-resize-complete');
+  ipcMain.removeAllListeners('toggle-dev-tools');
+  ipcMain.removeHandler('get-dev-tools-status');
   
   console.log('[IPC] Single-window handlers unregistered');
 }

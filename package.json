@@ -31,207 +31,43 @@
   },
   "keywords": [
     "whatsapp",
-    "electron",
     "desktop",
     "translation",
-    "ai",
-    "google-translate",
-    "gpt4",
-    "gemini",
-    "deepseek"
+    "electron",
+    "multi-account"
   ],
-  "author": "Your Name <your.email@example.com>",
+  "author": "Your Name",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/your-org/whatsapp-desktop-translation.git"
-  },
-  "bugs": {
-    "url": "https://github.com/your-org/whatsapp-desktop-translation/issues"
-  },
-  "homepage": "https://github.com/your-org/whatsapp-desktop-translation#readme",
-  "dependencies": {
-    "electron-store": "^8.1.0",
-    "lru-cache": "^10.0.0",
-    "uuid": "^13.0.0"
-  },
   "devDependencies": {
-    "electron": "^39.1.1",
-    "electron-builder": "^26.0.12",
-    "eslint": "^8.56.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "eslint": "^8.55.0",
     "jest": "^29.7.0"
   },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "electron-window-state": "^5.0.3"
+  },
   "build": {
-    "appId": "com.whatsapp.desktop.translation",
+    "appId": "com.example.whatsappdesktop",
     "productName": "WhatsApp Desktop Translation",
-    "copyright": "Copyright © 2024 ${author}",
     "directories": {
-      "output": "dist",
-      "buildResources": "resources"
+      "output": "dist"
     },
     "files": [
       "src/**/*",
-      "resources/**/*",
-      "!src/**/*.test.js",
-      "!src/**/__tests__/**",
-      "!**/*.map",
-      "!src/translation/examples/**",
-      "!**/*.md",
-      "!resources/BUILD_NOTES.md"
+      "package.json",
+      "LICENSE",
+      "README.md"
     ],
-    "asarUnpack": [],
-    "extraResources": [
-      {
-        "from": "docs",
-        "to": "docs",
-        "filter": [
-          "*.md"
-        ]
-      },
-      {
-        "from": "profiles",
-        "to": "profiles",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "ia32"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "resources/icon.ico",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "requestedExecutionLevel": "asInvoker"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "WhatsApp Desktop",
-      "license": "LICENSE",
-      "installerIcon": "resources/icon.ico",
-      "uninstallerIcon": "resources/icon.ico",
-      "installerHeaderIcon": "resources/icon.ico"
-    },
-    "portable": {
-      "artifactName": "${productName}-${version}-portable.${ext}"
-    },
     "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "resources/icon.icns",
-      "category": "public.app-category.social-networking",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "resources/entitlements.mac.plist",
-      "entitlementsInherit": "resources/entitlements.mac.plist"
+      "category": "public.app-category.productivity"
     },
-    "dmg": {
-      "contents": [
-        {
-          "x": 130,
-          "y": 220
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ],
-      "title": "${productName} ${version}",
-      "icon": "resources/icon.icns"
+    "win": {
+      "target": "nsis"
     },
     "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "rpm",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "resources/icons",
-      "category": "Network;InstantMessaging",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "synopsis": "WhatsApp Desktop with Translation",
-      "description": "WhatsApp Desktop application with comprehensive translation support including Google Translate, GPT-4, Gemini, and DeepSeek."
-    },
-    "appImage": {
-      "license": "LICENSE"
-    },
-    "deb": {
-      "depends": [
-        "gconf2",
-        "gconf-service",
-        "libnotify4",
-        "libappindicator1",
-        "libxtst6",
-        "libnss3"
-      ]
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "your-org",
-      "repo": "whatsapp-desktop-translation"
-    },
-    "afterPack": "./scripts/afterPack.js",
-    "npmRebuild": true
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "coverageDirectory": "coverage",
-    "collectCoverageFrom": [
-      "src/**/*.js",
-      "!src/**/*.test.js",
-      "!src/**/__tests__/**"
-    ],
-    "testMatch": [
-      "**/__tests__/**/*.js",
-      "**/*.test.js"
-    ]
+      "target": "AppImage"
+    }
   }
 }
