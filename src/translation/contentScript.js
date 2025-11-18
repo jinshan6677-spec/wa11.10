@@ -23,6 +23,11 @@
     _buttonMonitorInitialized: false,
     _lastContactId: null,
     _lastLogTime: {}, // 日志节流记录
+    
+    // 新增：智能翻译相关属性
+    _languageTrendCache: new Map(), // 语言趋势缓存
+    _messageCache: new Map(), // 消息缓存
+    _groupStats: new Map(), // 群组语言统计
 
     /**
      * 初始化翻译系统
@@ -274,31 +279,25 @@
           }
         }
 
-        // 提取消息文本
-        const textElement = messageNode.querySelector('.selectable-text[dir="ltr"], .selectable-text[dir="rtl"]') ||
-                           messageNode.querySelector('.selectable-text') ||
-                           messageNode.querySelector('[data-testid="conversation-text"]');
-
-        if (!textElement || !textElement.textContent.trim()) {
+        // 提取消息文本和发送者信息
+        const { text, senderInfo } = await this.extractMessageInfo(messageNode);
+        if (!text) {
           console.log('[Translation] No text found in message, skipping');
           return;
         }
 
-        const messageText = textElement.textContent.trim();
+        // 智能翻译：使用动态目标语言
+        const targetLang = await this.getSmartTargetLang(senderInfo.contactId, text, senderInfo);
         
-        // 聊天窗口翻译使用全局配置的目标语言（通常是中文）
-        // 不受好友独立配置影响
-        const targetLang = this.config.global.targetLang || 'zh-CN';
-        
-        // 只有当目标语言是中文时，才跳过中文消息
-        if (targetLang.startsWith('zh') && this.isChinese(messageText)) {
-          // 添加标记，避免重复检查
+        // 改进的中文检测
+        if (targetLang.startsWith('zh') && this.isAdvancedChinese(text)) {
+          console.log('[Translation] Smart Chinese detection: skipping Chinese message');
           messageNode.setAttribute('data-translation-skipped', 'true');
           return;
         }
 
         // 翻译消息（聊天窗口翻译，不使用风格）
-        await this.translateMessage(messageNode, messageText);
+        await this.translateMessage(messageNode, text, targetLang);
 
       } catch (error) {
         console.error('[Translation] Error handling message:', error);
@@ -392,32 +391,524 @@
     },
 
     /**
+     * 简化输入框翻译配置（清晰的优先级逻辑）
+     */
+    getInputTranslationConfig(contactId) {
+      try {
+        // 第1优先级：语言选择器（用户手动选择）
+        const langSelector = document.getElementById('wa-lang-selector');
+        let targetLang = langSelector ? langSelector.value : null;
+        
+        // 第2优先级：好友独立配置（如果启用且存在）
+        if (!targetLang || targetLang === 'auto') {
+          if (this.config.advanced.friendIndependent && 
+              contactId && 
+              this.config.friendConfigs && 
+              this.config.friendConfigs[contactId] &&
+              this.config.friendConfigs[contactId].enabled) {
+            targetLang = this.config.friendConfigs[contactId].targetLang;
+            console.log('[Translation] ✓ 使用好友独立配置:', targetLang);
+          }
+        }
+        
+        // 第3优先级：全局输入框配置
+        if (!targetLang || targetLang === 'auto') {
+          targetLang = this.config.inputBox.targetLang || 'auto';
+          console.log('[Translation] ✓ 使用全局输入框配置:', targetLang);
+        }
+        
+        // 返回完整的翻译配置
+        return {
+          targetLang: targetLang,
+          engine: this.config.inputBox.engine || this.config.global.engine,
+          style: this.config.inputBox.style || '通用'
+        };
+      } catch (error) {
+        console.error('[Translation] Error getting input translation config:', error);
+        return {
+          targetLang: 'auto',
+          engine: this.config.global.engine,
+          style: '通用'
+        };
+      }
+    },
+
+    /**
+     * 提取消息信息和发送者
+     */
+    async extractMessageInfo(messageNode) {
+      try {
+        // 提取消息文本
+        const textElement = messageNode.querySelector('.selectable-text[dir="ltr"], .selectable-text[dir="rtl"]') ||
+                           messageNode.querySelector('.selectable-text') ||
+                           messageNode.querySelector('[data-testid="conversation-text"]');
+
+        const text = textElement ? textElement.textContent.trim() : '';
+
+        // 提取发送者信息
+        let senderInfo = {
+          contactId: this.getCurrentContactId(),
+          senderName: null,
+          senderId: null,
+          isGroupMessage: this.isGroupChat()
+        };
+
+        // 群组消息中提取发言人信息
+        if (senderInfo.isGroupMessage) {
+          const senderName = this.extractGroupSenderName(messageNode);
+          if (senderName) {
+            senderInfo.senderName = senderName;
+            senderInfo.senderId = await this.getSenderId(senderName);
+            
+            // 更新群组语言统计
+            await this.updateGroupLanguageStats(senderInfo.contactId, text);
+          }
+        }
+
+        return { text, senderInfo };
+      } catch (error) {
+        console.error('[Translation] Error extracting message info:', error);
+        return { text: '', senderInfo: { contactId: this.getCurrentContactId(), senderName: null, senderId: null, isGroupMessage: false } };
+      }
+    },
+
+    /**
+     * 提取群组发言人名称
+     */
+    extractGroupSenderName(messageNode) {
+      try {
+        // 方法1: 查找群组消息中的发送者名称元素
+        const senderElement = messageNode.querySelector('._21w3g') || 
+                             messageNode.querySelector('._21w3g-0') ||
+                             messageNode.querySelector('[dir="auto"]');
+        
+        if (senderElement) {
+          const senderName = senderElement.textContent.trim();
+          if (senderName && !this.isOwnMessage(messageNode)) {
+            return senderName;
+          }
+        }
+        
+        // 方法2: 通过消息结构推断
+        const messageHeader = messageNode.querySelector('.selectable-text');
+        if (messageHeader) {
+          // 检查消息前面是否有发送者名称
+          const prevElement = messageHeader.parentElement?.previousElementSibling;
+          if (prevElement && prevElement.textContent.trim()) {
+            const name = prevElement.textContent.trim();
+            if (name.length < 50 && !this.isOwnMessage(messageNode)) { // 简单的名称验证
+              return name;
+            }
+          }
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('[Translation] Error extracting group sender name:', error);
+        return null;
+      }
+    },
+
+    /**
+     * 判断是否为自己的消息
+     */
+    isOwnMessage(messageNode) {
+      return messageNode.classList.contains('message-out') || 
+             messageNode.classList.contains('_1urd3');
+    },
+
+    /**
+     * 获取发言人ID（为群组统计和管理）
+     */
+    async getSenderId(senderName) {
+      try {
+        const groupId = this.getCurrentContactId();
+        if (!groupId || !this.isGroupChat()) {
+          return senderName; // 单聊直接使用名称
+        }
+        
+        // 创建群组发言人缓存键
+        const cacheKey = `group_${groupId}_sender_${senderName}`;
+        
+        // 检查缓存
+        if (this._senderIdCache && this._senderIdCache.has(cacheKey)) {
+          return this._senderIdCache.get(cacheKey);
+        }
+        
+        // 生成稳定的发言人ID
+        const senderId = `group_${groupId}_${senderName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        
+        // 缓存结果
+        if (!this._senderIdCache) {
+          this._senderIdCache = new Map();
+        }
+        this._senderIdCache.set(cacheKey, senderId);
+        
+        return senderId;
+      } catch (error) {
+        console.error('[Translation] Error getting sender ID:', error);
+        return senderName;
+      }
+    },
+
+    /**
+     * 更新群组语言统计
+     */
+    async updateGroupLanguageStats(groupId, messageText) {
+      try {
+        if (!groupId || !this.isGroupChat() || !messageText) {
+          return;
+        }
+        
+        // 初始化群组统计
+        if (!this._groupStats.has(groupId)) {
+          this._groupStats.set(groupId, {
+            totalMessages: 0,
+            senderStats: new Map(),
+            languageTrends: new Map(),
+            lastUpdate: Date.now()
+          });
+        }
+        
+        const groupStat = this._groupStats.get(groupId);
+        
+        // 检测消息语言
+        let detectedLang = 'unknown';
+        try {
+          if (window.translationAPI) {
+            const result = await window.translationAPI.detectLanguage(messageText);
+            if (result.success && result.data.language) {
+              detectedLang = result.data.language;
+            }
+          }
+        } catch (error) {
+          console.warn('[Translation] Language detection failed for group stats:', error);
+        }
+        
+        // 更新总体统计
+        groupStat.totalMessages++;
+        groupStat.languageTrends.set(detectedLang, 
+          (groupStat.languageTrends.get(detectedLang) || 0) + 1);
+        groupStat.lastUpdate = Date.now();
+        
+        // 限制内存使用，清理过旧的统计
+        if (groupStat.totalMessages > 1000) {
+          // 保留最近的500条记录
+          this.cleanupOldGroupStats(groupId);
+        }
+        
+      } catch (error) {
+        console.error('[Translation] Error updating group language stats:', error);
+      }
+    },
+
+    /**
+     * 清理过旧的群组统计数据
+     */
+    cleanupOldGroupStats(groupId) {
+      try {
+        const groupStat = this._groupStats.get(groupId);
+        if (!groupStat) return;
+        
+        // 重置统计但保留最近的趋势
+        const recentLanguages = new Map();
+        const languages = Array.from(groupStat.languageTrends.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5); // 只保留前5种语言
+        
+        languages.forEach(([lang, count]) => {
+          recentLanguages.set(lang, count);
+        });
+        
+        groupStat.languageTrends = recentLanguages;
+        groupStat.totalMessages = Array.from(recentLanguages.values()).reduce((a, b) => a + b, 0);
+        
+        console.log(`[Translation] Cleaned up old group stats for ${groupId}, kept ${recentLanguages.size} languages`);
+      } catch (error) {
+        console.error('[Translation] Error cleaning up group stats:', error);
+      }
+    },
+
+    /**
+     * 获取群组语言统计
+     */
+    getGroupLanguageStats(groupId) {
+      try {
+        if (!groupId || !this._groupStats.has(groupId)) {
+          return null;
+        }
+        
+        return this._groupStats.get(groupId);
+      } catch (error) {
+        console.error('[Translation] Error getting group language stats:', error);
+        return null;
+      }
+    },
+
+    /**
+     * 智能目标语言选择（增强版，支持群组统计）
+     */
+    async getSmartTargetLang(contactId, messageText, senderInfo = null) {
+      try {
+        // 1. 基础配置
+        const baseLang = this.config.global.targetLang || 'zh-CN';
+        
+        // 2. 群组模式下的特殊处理
+        if (senderInfo && senderInfo.isGroupMessage && senderInfo.senderId) {
+          const groupSuggestion = await this.getGroupSmartSuggestion(contactId, senderInfo.senderId, messageText);
+          if (groupSuggestion) {
+            console.log(`[Translation] 👥 群组智能建议: ${groupSuggestion.reason} - ${groupSuggestion.targetLang}`);
+            return groupSuggestion.targetLang;
+          }
+        }
+        
+        // 3. 检查缓存的语言趋势
+        const cacheKey = `trend_${contactId}`;
+        const cachedTrend = this._languageTrendCache.get(cacheKey);
+        
+        if (cachedTrend && Date.now() - cachedTrend.timestamp < 60000) { // 1分钟缓存
+          const { primaryLanguage, confidence } = cachedTrend;
+          
+          // 高置信度时跟随对方主要语言
+          if (confidence > 0.7) {
+            console.log(`[Translation] 🎯 使用缓存的语言趋势: ${primaryLanguage} (置信度: ${confidence.toFixed(2)})`);
+            return this.getOppositeLanguage(primaryLanguage);
+          }
+        }
+
+        // 4. 分析当前语言趋势
+        const trend = await this.analyzeLanguageTrend(contactId);
+        
+        // 5. 缓存结果
+        this._languageTrendCache.set(cacheKey, {
+          ...trend,
+          timestamp: Date.now()
+        });
+
+        // 6. 基于趋势调整目标语言
+        if (trend.confidence > 0.7) {
+          console.log(`[Translation] 📊 基于趋势调整目标语言: ${trend.primaryLanguage} → ${this.getOppositeLanguage(trend.primaryLanguage)}`);
+          return this.getOppositeLanguage(trend.primaryLanguage);
+        }
+
+        // 7. 消息级检测
+        const msgLang = await this.detectLanguage(messageText);
+        if (msgLang !== baseLang) {
+          console.log(`[Translation] 🔍 消息语言检测: ${msgLang} ≠ ${baseLang}，调整为目标: ${this.getOppositeLanguage(msgLang)}`);
+          return this.getOppositeLanguage(msgLang);
+        }
+
+        console.log(`[Translation] 使用默认目标语言: ${baseLang}`);
+        return baseLang;
+        
+      } catch (error) {
+        console.error('[Translation] Error in smart target language selection:', error);
+        return this.config.global.targetLang || 'zh-CN';
+      }
+    },
+
+    /**
+     * 获取群组智能翻译建议
+     */
+    async getGroupSmartSuggestion(groupId, senderId, messageText) {
+      try {
+        const groupStats = this.getGroupLanguageStats(groupId);
+        if (!groupStats) {
+          return null;
+        }
+        
+        // 1. 基于总体语言趋势
+        const languages = Array.from(groupStats.languageTrends.entries())
+          .sort((a, b) => b[1] - a[1]);
+        
+        if (languages.length > 0) {
+          const [primaryLang, count] = languages[0];
+          const confidence = count / groupStats.totalMessages;
+          
+          if (confidence > 0.6) {
+            return {
+              targetLang: this.getOppositeLanguage(primaryLang),
+              confidence: confidence,
+              reason: `群组主要语言趋势 (${primaryLang}, ${(confidence * 100).toFixed(1)}%)`
+            };
+          }
+        }
+        
+        // 2. 基于当前消息的快速检测
+        if (messageText && messageText.length > 10) {
+          try {
+            const msgLang = await this.detectLanguage(messageText);
+            if (!msgLang.startsWith('zh')) {
+              return {
+                targetLang: this.getOppositeLanguage(msgLang),
+                confidence: 0.8,
+                reason: `当前消息语言检测 (${msgLang})`
+              };
+            }
+          } catch (error) {
+            console.warn('[Translation] Failed to detect current message language:', error);
+          }
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('[Translation] Error getting group smart suggestion:', error);
+        return null;
+      }
+    },
+
+    /**
+     * 分析语言趋势
+     */
+    async analyzeLanguageTrend(contactId) {
+      try {
+        // 获取最近10条对方消息
+        const recentMessages = await this.getRecentMessages(contactId, 10);
+        const languages = {};
+        
+        for (const message of recentMessages) {
+          if (message.text && message.text.trim()) {
+            const lang = await this.detectLanguage(message.text);
+            languages[lang] = (languages[lang] || 0) + 1;
+          }
+        }
+        
+        // 返回主要语言和置信度
+        const langEntries = Object.entries(languages);
+        if (langEntries.length === 0) {
+          return { primaryLanguage: 'en', confidence: 0.5, allLanguages: {} };
+        }
+        
+        const primaryLang = langEntries.reduce((a, b) => languages[a[0]] > languages[b[0]] ? a : b)[0];
+        const confidence = languages[primaryLang] / recentMessages.length;
+        
+        console.log(`[Translation] 📈 语言趋势分析: 主要语言=${primaryLang}, 置信度=${confidence.toFixed(2)}, 所有语言=`, languages);
+        
+        return {
+          primaryLanguage: primaryLang,
+          confidence: confidence,
+          allLanguages: languages
+        };
+      } catch (error) {
+        console.error('[Translation] Error analyzing language trend:', error);
+        return { primaryLanguage: 'en', confidence: 0.5, allLanguages: {} };
+      }
+    },
+
+    /**
+     * 获取对方最近消息
+     */
+    async getRecentMessages(contactId, count = 10) {
+      try {
+        const cacheKey = `recent_${contactId}`;
+        const cached = this._messageCache.get(cacheKey);
+        
+        if (cached && Date.now() - cached.timestamp < 30000) { // 30秒缓存
+          return cached.messages;
+        }
+
+        // 从DOM中获取最近的接收消息
+        const incomingMessages = Array.from(document.querySelectorAll('.message-in'))
+          .slice(-count * 2) // 获取更多消息以确保有足够的接收消息
+          .filter(msg => {
+            const textElement = msg.querySelector('.selectable-text');
+            return textElement && textElement.textContent.trim();
+          })
+          .slice(-count); // 只取最后count条
+
+        const messages = incomingMessages.map(msg => ({
+          text: msg.querySelector('.selectable-text').textContent.trim(),
+          timestamp: Date.now() // 简化处理，实际应该从DOM获取时间戳
+        }));
+
+        // 缓存结果
+        this._messageCache.set(cacheKey, {
+          messages,
+          timestamp: Date.now()
+        });
+
+        return messages;
+      } catch (error) {
+        console.error('[Translation] Error getting recent messages:', error);
+        return [];
+      }
+    },
+
+    /**
+     * 获取相反语言
+     */
+    getOppositeLanguage(lang) {
+      const opposites = {
+        'zh-CN': 'en', 'zh-TW': 'en', 'en': 'zh-CN',
+        'vi': 'zh-CN', 'ja': 'zh-CN', 'ko': 'zh-CN',
+        'th': 'zh-CN', 'id': 'zh-CN', 'ms': 'zh-CN',
+        'es': 'zh-CN', 'fr': 'zh-CN', 'de': 'zh-CN',
+        'it': 'zh-CN', 'pt': 'zh-CN', 'ru': 'zh-CN',
+        'ar': 'zh-CN', 'hi': 'zh-CN', 'bn': 'zh-CN'
+      };
+      
+      return opposites[lang] || 'zh-CN';
+    },
+
+    /**
+     * 改进的中文检测
+     */
+    isAdvancedChinese(text) {
+      if (!text || text.length === 0) return false;
+      
+      // 1. 严格中文字符检测
+      const chineseChars = text.match(/[\u4e00-\u9fff]/g) || [];
+      const totalChars = text.length;
+      const chineseRatio = chineseChars.length / totalChars;
+      
+      // 2. 排除数字和英文词汇
+      const englishWords = text.match(/\b[a-zA-Z]+\b/g) || [];
+      const hasNumbers = /\d/.test(text);
+      const hasPunctuation = /[.,!?;:()]/.test(text);
+      
+      // 3. 检测是否为纯英文或混合语言
+      const isPureEnglish = /^[\s\w.,!?;:()'"-]*$/.test(text) && englishWords.length > 2;
+      
+      // 4. 综合判断逻辑
+      const isChinese = chineseRatio > 0.6 && // 中文字符占比超过60%
+                       englishWords.length < 2 && // 英文单词少于2个
+                       !hasNumbers && // 不含数字
+                       !isPureEnglish; // 不是纯英文
+      
+      console.log(`[Translation] 🔍 智能中文检测: "${text.substring(0, 20)}..." 中文字符占比=${chineseRatio.toFixed(2)}, 英文词=${englishWords.length}, 结果=${isChinese}`);
+      
+      return isChinese;
+    },
+
+    /**
      * 翻译消息（聊天窗口接收的消息）
      * 注意：聊天窗口翻译不使用风格参数，只做正常翻译
      */
-    async translateMessage(messageNode, text) {
+    async translateMessage(messageNode, text, targetLang = null) {
       try {
         if (!window.translationAPI) {
           console.error('[Translation] translationAPI not available');
           return;
         }
 
+        // 使用智能选择的目标语言
+        const finalTargetLang = targetLang || this.config.global.targetLang || 'zh-CN';
+        
         // 聊天窗口翻译使用全局配置的引擎（可以是谷歌或AI）
-        // 接收到的消息应该翻译成用户设置的目标语言（通常是中文）
         const engineName = this.config.global.engine;
-        console.log(`[Translation] 🔄 聊天窗口翻译，使用引擎: ${engineName}（不使用风格）`);
+        console.log(`[Translation] 🔄 智能聊天窗口翻译，使用引擎: ${engineName}, 目标语言: ${finalTargetLang}`);
         
         const response = await window.translationAPI.translate({
           accountId: this.accountId,
           text: text,
           sourceLang: this.config.global.sourceLang || 'auto',
-          targetLang: this.config.global.targetLang || 'zh-CN',
+          targetLang: finalTargetLang,
           engineName: engineName,
           options: {} // 聊天窗口翻译不传递风格参数
         });
 
         if (response.success) {
-          console.log(`[Translation] ✅ 翻译成功，使用引擎: ${response.data.engineName || engineName}`);
+          console.log(`[Translation] ✅ 智能翻译成功，使用引擎: ${response.data.engineName || engineName}`);
           this.displayTranslation(messageNode, response.data);
         } else {
           console.error('[Translation] Translation failed:', response.error);
@@ -677,7 +1168,7 @@
      * 初始化输入框翻译
      * 优化：清理旧的监听器，避免重复初始化，添加重试限制
      */
-    initInputBoxTranslation(retryCount = 0) {
+    async initInputBoxTranslation(retryCount = 0) {
       // 先移除旧的翻译按钮（如果存在）
       const oldButton = document.getElementById('wa-translate-btn');
       if (oldButton) {
@@ -702,6 +1193,8 @@
       // 添加翻译按钮
       if (this.config && this.config.inputBox && this.config.inputBox.enabled) {
         this.addTranslateButton(inputBox);
+        // 添加增强版语言选择器
+        await this.addLanguageSelector(inputBox);
       } else {
         console.log('[Translation] Input box translation disabled in config');
       }
@@ -947,9 +1440,9 @@
     },
 
     /**
-     * 添加语言选择器
+     * 添加增强版语言选择器
      */
-    addLanguageSelector(inputBox) {
+    async addLanguageSelector(inputBox) {
       const footer = document.querySelector('#main footer') ||
                     document.querySelector('[data-testid="conversation-compose-box"]') ||
                     document.querySelector('footer');
@@ -965,38 +1458,70 @@
         return;
       }
 
+      // 创建增强语言选择器容器
+      const selectorContainer = document.createElement('div');
+      selectorContainer.className = 'wa-language-selector-container';
+      selectorContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 8px;
+      `;
+
+      // 获取智能语言建议
+      const suggestion = await this.getLanguageSuggestion();
+      
       // 创建语言选择器
       const selector = document.createElement('select');
       selector.id = 'wa-lang-selector';
       selector.className = 'wa-lang-selector';
       selector.title = '选择翻译目标语言';
       
-      // 添加语言选项
+      // 增强语言列表
       const languages = [
         { code: 'auto', name: '🤖 自动检测' },
+        { code: 'suggested', name: `💡 建议: ${suggestion.name}`, highlight: true },
         { code: 'en', name: '🇬🇧 English' },
-        { code: 'zh-CN', name: '🇨🇳 中文' },
+        { code: 'zh-CN', name: '🇨🇳 中文简体' },
+        { code: 'zh-TW', name: '🇹🇼 中文繁体' },
         { code: 'vi', name: '🇻🇳 Tiếng Việt' },
         { code: 'ja', name: '🇯🇵 日本語' },
         { code: 'ko', name: '🇰🇷 한국어' },
+        { code: 'th', name: '🇹🇭 ไทย' },
+        { code: 'id', name: '🇮🇩 Bahasa Indonesia' },
+        { code: 'ms', name: '🇲🇾 Bahasa Melayu' },
         { code: 'es', name: '🇪🇸 Español' },
         { code: 'fr', name: '🇫🇷 Français' },
         { code: 'de', name: '🇩🇪 Deutsch' },
+        { code: 'it', name: '🇮🇹 Italiano' },
+        { code: 'pt', name: '🇵🇹 Português' },
         { code: 'ru', name: '🇷🇺 Русский' },
         { code: 'ar', name: '🇸🇦 العربية' },
-        { code: 'pt', name: '🇵🇹 Português' },
-        { code: 'it', name: '🇮🇹 Italiano' }
+        { code: 'hi', name: '🇮🇳 हिन्दी' },
+        { code: 'bn', name: '🇧🇩 বাংলা' },
+        { code: 'ur', name: '🇵🇰 اردو' },
+        { code: 'tr', name: '🇹🇷 Türkçe' },
+        { code: 'fa', name: '🇮🇷 فارسی' },
+        { code: 'he', name: '🇮🇱 עברית' }
       ];
       
       languages.forEach(lang => {
         const option = document.createElement('option');
         option.value = lang.code;
         option.textContent = lang.name;
+        
+        // 高亮建议选项
+        if (lang.highlight) {
+          option.style.backgroundColor = '#e3f2fd';
+          option.style.color = '#1976d2';
+          option.style.fontWeight = 'bold';
+        }
+        
         selector.appendChild(option);
       });
       
-      // 默认选择自动检测
-      selector.value = 'auto';
+      // 默认选择建议语言或自动检测
+      selector.value = suggestion.confidence > 0.6 ? 'suggested' : 'auto';
       
       // 添加样式
       selector.style.cssText = `
@@ -1006,27 +1531,364 @@
         border-radius: 8px;
         cursor: pointer;
         font-size: 13px;
-        margin: 0 8px;
         transition: all 0.2s;
+        min-width: 120px;
       `;
       
       selector.onmouseenter = () => {
         selector.style.background = 'rgba(0, 0, 0, 0.05)';
+        selector.style.borderColor = 'rgba(102, 126, 234, 0.3)';
       };
       
       selector.onmouseleave = () => {
         selector.style.background = 'transparent';
+        selector.style.borderColor = 'rgba(0, 0, 0, 0.1)';
       };
+      
+      // 添加选择变化监听
+      selector.addEventListener('change', (e) => {
+        if (e.target.value === 'suggested') {
+          // 如果选择了建议，则应用建议的语言
+          e.target.value = suggestion.code;
+          this.showToast(`已应用智能建议: ${suggestion.name}`, 'success');
+        }
+      });
+
+      // 创建智能建议提示
+      const suggestionTip = document.createElement('div');
+      suggestionTip.className = 'wa-language-suggestion-tip';
+      suggestionTip.innerHTML = `
+        <span class="tip-icon">💡</span>
+        <span class="tip-text">建议: ${suggestion.name}</span>
+      `;
+      suggestionTip.style.cssText = `
+        padding: 4px 8px;
+        background: rgba(102, 126, 234, 0.1);
+        border: 1px solid rgba(102, 126, 234, 0.3);
+        border-radius: 6px;
+        font-size: 11px;
+        color: #667eea;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+      `;
+      
+      suggestionTip.onclick = () => {
+        selector.value = suggestion.code;
+        this.showToast(`已切换到建议语言: ${suggestion.name}`, 'success');
+      };
+      
+      suggestionTip.onmouseenter = () => {
+        suggestionTip.style.background = 'rgba(102, 126, 234, 0.15)';
+        suggestionTip.style.transform = 'scale(1.05)';
+      };
+      
+      suggestionTip.onmouseleave = () => {
+        suggestionTip.style.background = 'rgba(102, 126, 234, 0.1)';
+        suggestionTip.style.transform = 'scale(1)';
+      };
+
+      // 组装容器
+      selectorContainer.appendChild(selector);
+      selectorContainer.appendChild(suggestionTip);
       
       // 添加到翻译按钮旁边
       const translateBtn = document.getElementById('wa-translate-btn');
       if (translateBtn && translateBtn.parentNode) {
-        translateBtn.parentNode.insertBefore(selector, translateBtn);
+        translateBtn.parentNode.insertBefore(selectorContainer, translateBtn);
       } else {
-        footer.appendChild(selector);
+        footer.appendChild(selectorContainer);
       }
       
-      console.log('[Translation] Language selector added');
+      // 添加翻译模式切换器
+      this.addTranslationModeToggle(selectorContainer);
+      
+      console.log(`[Translation] Enhanced language selector added with suggestion: ${suggestion.name} (confidence: ${suggestion.confidence.toFixed(2)})`);
+    },
+
+    /**
+     * 添加翻译模式切换器
+     */
+    addTranslationModeToggle(container) {
+      // 检查是否已存在
+      if (document.getElementById('wa-translation-mode-toggle')) {
+        return;
+      }
+
+      // 创建模式切换器容器
+      const modeContainer = document.createElement('div');
+      modeContainer.id = 'wa-translation-mode-toggle';
+      modeContainer.className = 'wa-translation-mode-toggle';
+      modeContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 8px;
+        padding: 4px 8px;
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 16px;
+        font-size: 12px;
+      `;
+
+      // 定义翻译模式
+      const modes = [
+        { 
+          id: 'smart', 
+          name: '🤖', 
+          title: '智能模式',
+          description: '自动检测并翻译'
+        },
+        { 
+          id: 'manual', 
+          name: '🎯', 
+          title: '手动模式',
+          description: '需要时点击翻译'
+        },
+        { 
+          id: 'realtime', 
+          name: '⚡', 
+          title: '实时模式',
+          description: '输入时实时预览'
+        }
+      ];
+
+      // 获取当前模式（从配置中读取或默认为智能模式）
+      const currentMode = this.config?.advanced?.translationMode || 'smart';
+
+      // 创建模式按钮
+      modes.forEach((mode, index) => {
+        const modeBtn = document.createElement('button');
+        modeBtn.className = `mode-btn ${mode.id} ${mode.id === currentMode ? 'active' : ''}`;
+        modeBtn.innerHTML = mode.name;
+        modeBtn.title = `${mode.title}: ${mode.description}`;
+        modeBtn.style.cssText = `
+          padding: 4px 6px;
+          background: ${mode.id === currentMode ? 'rgba(102, 126, 234, 0.2)' : 'transparent'};
+          border: none;
+          border-radius: 12px;
+          cursor: pointer;
+          font-size: 14px;
+          transition: all 0.2s;
+          opacity: ${mode.id === currentMode ? '1' : '0.6'};
+        `;
+
+        modeBtn.onclick = () => {
+          this.switchTranslationMode(mode.id);
+          
+          // 更新按钮样式
+          document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.style.background = 'transparent';
+            btn.style.opacity = '0.6';
+          });
+          modeBtn.style.background = 'rgba(102, 126, 234, 0.2)';
+          modeBtn.style.opacity = '1';
+        };
+
+        modeBtn.onmouseenter = () => {
+          if (mode.id !== currentMode) {
+            modeBtn.style.opacity = '0.8';
+          }
+        };
+
+        modeBtn.onmouseleave = () => {
+          if (mode.id !== currentMode) {
+            modeBtn.style.opacity = '0.6';
+          }
+        };
+
+        modeContainer.appendChild(modeBtn);
+
+        // 添加分隔符（除了最后一个）
+        if (index < modes.length - 1) {
+          const separator = document.createElement('span');
+          separator.textContent = '|';
+          separator.style.cssText = `
+            color: rgba(0, 0, 0, 0.3);
+            font-size: 10px;
+            margin: 0 2px;
+          `;
+          modeContainer.appendChild(separator);
+        }
+      });
+
+      // 添加到容器
+      container.appendChild(modeContainer);
+      
+      // 初始化模式设置
+      this.initializeTranslationMode(currentMode);
+      
+      console.log(`[Translation] Translation mode toggle added: ${currentMode}`);
+    },
+
+    /**
+     * 切换翻译模式
+     */
+    async switchTranslationMode(mode) {
+      try {
+        console.log(`[Translation] Switching to ${mode} mode`);
+        
+        // 保存模式到配置
+        if (!this.config.advanced) {
+          this.config.advanced = {};
+        }
+        this.config.advanced.translationMode = mode;
+        
+        // 根据模式调整功能
+        await this.applyTranslationMode(mode);
+        
+        // 显示切换提示
+        const modeNames = {
+          'smart': '智能模式',
+          'manual': '手动模式',
+          'realtime': '实时模式'
+        };
+        
+        this.showToast(`已切换到${modeNames[mode]}`, 'success');
+        
+      } catch (error) {
+        console.error('[Translation] Error switching translation mode:', error);
+        this.showToast('切换翻译模式失败', 'error');
+      }
+    },
+
+    /**
+     * 应用翻译模式设置
+     */
+    async applyTranslationMode(mode) {
+      try {
+        const inputBox = document.querySelector('footer [contenteditable="true"]') ||
+                        document.querySelector('[data-testid="conversation-compose-box-input"]') ||
+                        document.querySelector('#main footer div[contenteditable="true"]');
+
+        switch (mode) {
+          case 'smart':
+            // 智能模式：启用自动翻译和实时预览
+            if (this.config.advanced) {
+              this.config.advanced.realtime = true;
+              this.config.global.autoTranslate = true;
+            }
+            await this.setupRealtimeTranslation(inputBox);
+            break;
+            
+          case 'manual':
+            // 手动模式：只显示翻译按钮，禁用自动和实时翻译
+            if (this.config.advanced) {
+              this.config.advanced.realtime = false;
+              this.config.global.autoTranslate = false;
+            }
+            this.cleanupRealtimeTranslation();
+            break;
+            
+          case 'realtime':
+            // 实时模式：强制启用实时翻译
+            if (this.config.advanced) {
+              this.config.advanced.realtime = true;
+            }
+            await this.setupRealtimeTranslation(inputBox);
+            break;
+        }
+        
+      } catch (error) {
+        console.error('[Translation] Error applying translation mode:', error);
+      }
+    },
+
+    /**
+     * 初始化翻译模式
+     */
+    async initializeTranslationMode(mode) {
+      try {
+        await this.applyTranslationMode(mode);
+      } catch (error) {
+        console.error('[Translation] Error initializing translation mode:', error);
+      }
+    },
+
+    /**
+     * 获取智能语言建议
+     */
+    async getLanguageSuggestion() {
+      try {
+        const contactId = this.getCurrentContactId();
+        
+        // 1. 基于语言趋势分析
+        const trend = await this.analyzeLanguageTrend(contactId);
+        if (trend.confidence > 0.6) {
+          const suggestedLang = this.getOppositeLanguage(trend.primaryLanguage);
+          return {
+            code: suggestedLang,
+            name: this.getLanguageName(suggestedLang),
+            confidence: trend.confidence,
+            reason: '基于对话语言趋势'
+          };
+        }
+        
+        // 2. 基于最近消息检测
+        const recentMessages = await this.getRecentMessages(contactId, 5);
+        if (recentMessages.length > 0) {
+          const message = recentMessages[recentMessages.length - 1];
+          const detectedLang = await this.detectLanguage(message.text);
+          
+          if (!detectedLang.startsWith('zh')) {
+            const suggestedLang = this.getOppositeLanguage(detectedLang);
+            return {
+              code: suggestedLang,
+              name: this.getLanguageName(suggestedLang),
+              confidence: 0.7,
+              reason: '基于最新消息'
+            };
+          }
+        }
+        
+        // 3. 默认建议
+        return {
+          code: 'en',
+          name: '🇬🇧 English',
+          confidence: 0.5,
+          reason: '通用选择'
+        };
+        
+      } catch (error) {
+        console.error('[Translation] Error getting language suggestion:', error);
+        return {
+          code: 'en',
+          name: '🇬🇧 English',
+          confidence: 0.5,
+          reason: '默认建议'
+        };
+      }
+    },
+
+    /**
+     * 获取语言显示名称
+     */
+    getLanguageName(langCode) {
+      const names = {
+        'en': '🇬🇧 English',
+        'zh-CN': '🇨🇳 中文简体',
+        'zh-TW': '🇹🇼 中文繁体',
+        'vi': '🇻🇳 Tiếng Việt',
+        'ja': '🇯🇵 日本語',
+        'ko': '🇰🇷 한국어',
+        'th': '🇹🇭 ไทย',
+        'id': '🇮🇩 Bahasa Indonesia',
+        'ms': '🇲🇾 Bahasa Melayu',
+        'es': '🇪🇸 Español',
+        'fr': '🇫🇷 Français',
+        'de': '🇩🇪 Deutsch',
+        'it': '🇮🇹 Italiano',
+        'pt': '🇵🇹 Português',
+        'ru': '🇷🇺 Русский',
+        'ar': '🇸🇦 العربية',
+        'hi': '🇮🇳 हिन्दी',
+        'bn': '🇧🇩 বাংলা',
+        'ur': '🇵🇰 اردو',
+        'tr': '🇹🇷 Türkçe',
+        'fa': '🇮🇷 فارسی',
+        'he': '🇮🇱 עברית'
+      };
+      
+      return names[langCode] || `语言代码: ${langCode}`;
     },
 
     /**
@@ -1447,28 +2309,9 @@
         const contactId = this.getCurrentContactId();
         console.log('[Translation] Input box translation for contact:', contactId);
         
-        // 获取目标语言
-        // 优先级：语言选择器 > 联系人独立配置 > 输入框配置
-        const langSelector = document.getElementById('wa-lang-selector');
-        let targetLang = langSelector ? langSelector.value : null;
-        
-        // 如果语言选择器没有选择或选择了auto
-        if (!targetLang || targetLang === 'auto') {
-          // 如果启用了好友独立配置，且该联系人有独立配置
-          if (this.config.advanced.friendIndependent && 
-              contactId && 
-              this.config.friendConfigs && 
-              this.config.friendConfigs[contactId] &&
-              this.config.friendConfigs[contactId].enabled) {
-            // 使用联系人的独立配置
-            targetLang = this.config.friendConfigs[contactId].targetLang || this.config.inputBox.targetLang || 'auto';
-            console.log('[Translation] Using friend-specific targetLang:', targetLang);
-          } else {
-            // 使用输入框配置（不是全局配置！）
-            targetLang = this.config.inputBox.targetLang || 'auto';
-            console.log('[Translation] Using inputBox targetLang:', targetLang);
-          }
-        }
+        // 使用简化的配置获取逻辑
+        const config = this.getInputTranslationConfig(contactId);
+        let targetLang = config.targetLang;
         
         // 如果设置为自动检测，则检测对方使用的语言
         if (targetLang === 'auto') {
@@ -1476,26 +2319,24 @@
           console.log('[Translation] Auto-detected chat language:', targetLang);
         }
         
-        // 如果还是检测不到，默认翻译成英文
+        // 最终兜底
         if (!targetLang || targetLang === 'auto') {
           targetLang = 'en';
         }
         
-        console.log('[Translation] Final target language:', targetLang);
+        console.log(`[Translation] Final target language: ${targetLang}, Engine: ${config.engine}, Style: ${config.style}`);
         
-        // 输入框翻译使用独立的引擎配置和风格参数
-        const inputBoxEngine = this.config.inputBox.engine || this.config.global.engine;
-        const inputBoxStyle = this.config.inputBox.style || '通用';
-        console.log(`[Translation] 🎨 输入框翻译，使用引擎: ${inputBoxEngine}, 风格: ${inputBoxStyle}`);
+        // 使用简化的配置
+        console.log(`[Translation] 🎨 输入框翻译，使用引擎: ${config.engine}, 风格: ${config.style}`);
         
         const response = await window.translationAPI.translate({
           accountId: this.accountId,
           text: text,
           sourceLang: 'auto',
           targetLang: targetLang,
-          engineName: inputBoxEngine,
+          engineName: config.engine,
           options: {
-            style: inputBoxStyle // 输入框翻译使用风格参数
+            style: config.style // 输入框翻译使用风格参数
           }
         });
 
@@ -1805,32 +2646,9 @@
             const contactId = this.getCurrentContactId();
             console.log('[Translation] Realtime translation for contact:', contactId);
             
-            // 获取该联系人的配置（可能是独立配置）
-            const contactConfig = this.getContactConfig(contactId);
-            console.log('[Translation] Using contact config for realtime:', contactConfig);
-            
-            // 获取目标语言
-            // 优先级：语言选择器 > 联系人独立配置 > 输入框配置
-            const langSelector = document.getElementById('wa-lang-selector');
-            let targetLang = langSelector ? langSelector.value : null;
-            
-            // 如果语言选择器没有选择或选择了auto
-            if (!targetLang || targetLang === 'auto') {
-              // 如果启用了好友独立配置，且该联系人有独立配置
-              if (this.config.advanced.friendIndependent && 
-                  contactId && 
-                  this.config.friendConfigs && 
-                  this.config.friendConfigs[contactId] &&
-                  this.config.friendConfigs[contactId].enabled) {
-                // 使用联系人的独立配置
-                targetLang = this.config.friendConfigs[contactId].targetLang || this.config.inputBox.targetLang || 'auto';
-                console.log('[Translation] Using friend-specific targetLang:', targetLang);
-              } else {
-                // 使用输入框配置（不是全局配置！）
-                targetLang = this.config.inputBox.targetLang || 'auto';
-                console.log('[Translation] Using inputBox targetLang:', targetLang);
-              }
-            }
+            // 使用简化的配置获取逻辑
+            const config = this.getInputTranslationConfig(contactId);
+            let targetLang = config.targetLang;
             
             // 如果设置为自动检测，则检测对方使用的语言
             if (targetLang === 'auto') {
@@ -1843,20 +2661,16 @@
               targetLang = 'en';
             }
             
-            console.log('[Translation] Realtime target language:', targetLang);
-            
-            // 实时翻译也使用输入框的引擎和风格配置
-            const inputBoxEngine = this.config.inputBox.engine || this.config.global.engine;
-            const inputBoxStyle = this.config.inputBox.style || '通用';
+            console.log(`[Translation] Realtime target language: ${targetLang}, Engine: ${config.engine}, Style: ${config.style}`);
             
             const response = await window.translationAPI.translate({
               accountId: this.accountId,
               text: text,
               sourceLang: 'auto',
               targetLang: targetLang,
-              engineName: inputBoxEngine,
+              engineName: config.engine,
               options: {
-                style: inputBoxStyle // 实时翻译使用风格参数
+                style: config.style // 实时翻译使用风格参数
               }
             });
             
@@ -3089,13 +3903,13 @@
               <div class="setting-item">
                 <label class="setting-title">聊天窗口翻译引擎（接收消息）</label>
                 <select id="translationEngine" class="setting-select">
-                  <option value="google">Google 翻译（免费，推荐）</option>
-                  <option value="gpt4">GPT-4</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="custom">自定义 API</option>
+                  <option value="google">Google 翻译 - 免费，无需API</option>
+                  <option value="gpt4">GPT-4 - 需API密钥</option>
+                  <option value="gemini">Google Gemini - 需API密钥</option>
+                  <option value="deepseek">DeepSeek - 需API密钥</option>
+                  <option value="custom">自定义 API - 需配置</option>
                 </select>
-                <p class="setting-desc">💡 用于翻译对方发来的消息，推荐使用谷歌翻译（免费）节省成本</p>
+                <p class="setting-desc">💡 用于翻译对方发来的消息，推荐使用谷歌翻译（免费，无需API）节省成本</p>
               </div>
               
               <div class="setting-item">
@@ -3169,13 +3983,13 @@
               <div class="setting-item">
                 <label class="setting-title">输入框翻译引擎（发送消息）</label>
                 <select id="inputBoxEngine" class="setting-select">
-                  <option value="google">Google 翻译（免费）</option>
-                  <option value="gpt4">GPT-4（支持风格）</option>
-                  <option value="gemini">Google Gemini（支持风格）</option>
-                  <option value="deepseek">DeepSeek（支持风格）</option>
-                  <option value="custom">自定义 API（支持风格）</option>
+                  <option value="google">Google 翻译 - 免费，无需API，无风格</option>
+                  <option value="gpt4">GPT-4 - 需API密钥，支持风格</option>
+                  <option value="gemini">Google Gemini - 需API密钥，支持风格</option>
+                  <option value="deepseek">DeepSeek - 需API密钥，支持风格</option>
+                  <option value="custom">自定义 API - 需配置，支持风格</option>
                 </select>
-                <p class="setting-desc">💡 用于翻译你要发送的消息，AI 引擎支持风格定制（如正式、口语化等）</p>
+                <p class="setting-desc">💡 用于翻译你要发送的消息，AI 引擎支持风格定制，谷歌翻译为机器翻译（无风格选项）</p>
               </div>
               
               <div class="setting-item">
@@ -3441,6 +4255,8 @@
         const previousEngine = this.currentEngine || this.config?.global?.engine;
         const newEngine = e.target.value;
         
+        console.log(`[Settings] 聊天引擎切换: ${previousEngine} → ${newEngine}`);
+        
         // 在切换前，保存当前引擎的配置（如果有输入）
         if (previousEngine && previousEngine !== 'google') {
           await this.saveCurrentEngineConfig(previousEngine);
@@ -3449,20 +4265,42 @@
         // 更新当前引擎
         this.currentEngine = newEngine;
         
-        // 加载新引擎的配置
-        await this.loadEngineConfig();
+        // 确保预加载配置已准备好
+        if (!this.preloadedConfigs) {
+          await this.preloadAllEngineConfigs();
+        }
+        
+        // 立即刷新配置显示
+        await this.refreshAPIConfigDisplay();
         
         // 更新界面显示
         this.updateAPIConfigVisibility();
         this.updateTranslationStyleVisibility();
+        
+        // 显示切换提示
+        this.showEngineSwitchToast(newEngine);
       });
 
       // 输入框翻译引擎变化
       const inputBoxEngineSelect = this.panel.querySelector('#inputBoxEngine');
-      inputBoxEngineSelect.addEventListener('change', () => {
+      inputBoxEngineSelect.addEventListener('change', async (e) => {
+        const newEngine = e.target.value;
+        console.log(`[Settings] 输入框引擎切换: → ${newEngine}`);
+        
+        // 确保预加载配置已准备好
+        if (!this.preloadedConfigs) {
+          await this.preloadAllEngineConfigs();
+        }
+        
+        // 立即刷新配置显示
+        await this.refreshAPIConfigDisplay();
+        
         // 更新界面显示
         this.updateAPIConfigVisibility();
         this.updateTranslationStyleVisibility();
+        
+        // 显示切换提示
+        this.showEngineSwitchToast(newEngine, true);
       });
 
       // 测试 API 按钮
@@ -3521,8 +4359,16 @@
       
       // translationAPI 由 preload 脚本提供
 
+      console.log('[Settings] Opening settings panel, loading configurations...');
+      
       // 加载当前配置
       await this.loadSettings();
+      
+      // 预加载所有引擎配置（确保显示时有完整信息）
+      await this.preloadAllEngineConfigs();
+      
+      // 确保UI更新完成
+      this.updateUI();
       
       // 显示面板
       this.panel.style.display = 'flex';
@@ -3532,6 +4378,8 @@
       setTimeout(() => {
         this.panel.classList.add('show');
       }, 10);
+      
+      console.log('[Settings] ✅ Settings panel opened and configured');
     }
 
     /**
@@ -3557,10 +4405,16 @@
         const response = await window.translationAPI.getConfig(accountId);
         if (response.success && (response.config || response.data)) {
           this.config = response.config || response.data;
+          
+          // 先更新UI（设置当前引擎）
           this.updateUI();
           
-          // 加载引擎配置
+          // 然后加载引擎配置（需要当前引擎信息）
           await this.loadEngineConfig();
+          
+          console.log('[Settings] ✅ Settings loaded successfully');
+        } else {
+          console.warn('[Settings] ⚠️ Failed to load config, using defaults');
         }
       } catch (error) {
         console.error('[Settings] Failed to load settings:', error);
@@ -3568,7 +4422,7 @@
     }
 
     /**
-     * 保存当前引擎的配置（在切换引擎前调用）
+     * 保存当前引擎配置
      */
     async saveCurrentEngineConfig(engineName) {
       try {
@@ -3577,42 +4431,203 @@
           return;
         }
         
-        const apiKey = this.panel.querySelector('#apiKey')?.value;
+        console.log(`[Settings] Saving config for engine: ${engineName}`);
         
-        // 如果没有输入 API 密钥，不保存
-        if (!apiKey || !apiKey.trim()) {
-          return;
-        }
+        // 获取当前输入的值
+        const apiKeyInput = this.panel.querySelector('#apiKey')?.value;
+        const apiEndpointInput = this.panel.querySelector('#apiEndpoint')?.value;
+        const apiModelInput = this.panel.querySelector('#apiModel')?.value;
         
-        const apiEndpoint = this.panel.querySelector('#apiEndpoint')?.value;
-        const apiModel = this.panel.querySelector('#apiModel')?.value;
+        // 获取已保存的配置
+        const savedConfigResponse = await window.translationAPI.getEngineConfig(engineName);
+        const savedConfig = savedConfigResponse.success ? savedConfigResponse.data : {};
         
+        // 合并配置：优先使用新输入的值，如果没有则保留已保存的值
         const engineConfig = {
           enabled: true,
-          apiKey: apiKey.trim()
+          apiKey: (apiKeyInput && apiKeyInput.trim()) || savedConfig.apiKey || '',
+          endpoint: '',
+          model: ''
         };
         
         // 根据引擎类型设置默认值
         if (engineName === 'custom') {
-          engineConfig.endpoint = apiEndpoint?.trim() || '';
-          engineConfig.model = apiModel?.trim() || 'gpt-4';
+          engineConfig.endpoint = (apiEndpointInput && apiEndpointInput.trim()) || savedConfig.endpoint || '';
+          engineConfig.model = (apiModelInput && apiModelInput.trim()) || savedConfig.model || 'gpt-4';
           engineConfig.name = 'Custom API';
         } else if (engineName === 'gpt4') {
           engineConfig.endpoint = 'https://api.openai.com/v1/chat/completions';
-          engineConfig.model = apiModel?.trim() || 'gpt-4';
+          engineConfig.model = (apiModelInput && apiModelInput.trim()) || savedConfig.model || 'gpt-4';
         } else if (engineName === 'gemini') {
           engineConfig.endpoint = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
-          engineConfig.model = apiModel?.trim() || 'gemini-pro';
+          engineConfig.model = (apiModelInput && apiModelInput.trim()) || savedConfig.model || 'gemini-pro';
         } else if (engineName === 'deepseek') {
           engineConfig.endpoint = 'https://api.deepseek.com/v1/chat/completions';
-          engineConfig.model = apiModel?.trim() || 'deepseek-chat';
+          engineConfig.model = (apiModelInput && apiModelInput.trim()) || savedConfig.model || 'deepseek-chat';
+        }
+        
+        // 如果没有任何配置信息，则不保存
+        if (!engineConfig.apiKey) {
+          console.log(`[Settings] No API key for ${engineName}, skipping save`);
+          return;
         }
         
         // 保存配置
         await window.translationAPI.saveEngineConfig(engineName, engineConfig);
-        console.log(`[Settings] Auto-saved config for ${engineName} before switching`);
+        console.log(`[Settings] ✅ Auto-saved config for ${engineName} (API key: ${engineConfig.apiKey.substring(0, 8)}...)`);
       } catch (error) {
-        console.error('[Settings] Failed to auto-save engine config:', error);
+        console.error('[Settings] ❌ Failed to auto-save engine config:', error);
+      }
+    }
+
+    /**
+     * 预加载所有AI引擎配置
+     */
+    async preloadAllEngineConfigs() {
+      try {
+        const aiEngines = ['gpt4', 'gemini', 'deepseek', 'custom'];
+        const configs = {};
+        
+        console.log('[Settings] Preloading all AI engine configs...');
+        
+        // 并行加载所有引擎的配置
+        const loadPromises = aiEngines.map(async (engineName) => {
+          try {
+            const response = await window.translationAPI.getEngineConfig(engineName);
+            if (response.success && response.data) {
+              configs[engineName] = response.data;
+              if (response.data.apiKey) {
+                console.log(`[Settings] ✅ Preloaded config for ${engineName} (with API key)`);
+              } else {
+                console.log(`[Settings] ⚠️ Preloaded config for ${engineName} (no API key)`);
+              }
+            } else {
+              console.log(`[Settings] ⚠️ No config response for ${engineName}`);
+            }
+          } catch (error) {
+            console.warn(`[Settings] Failed to preload config for ${engineName}:`, error);
+          }
+        });
+        
+        await Promise.all(loadPromises);
+        
+        // 存储预加载的配置
+        this.preloadedConfigs = configs;
+        console.log('[Settings] ✅ Preloaded configs summary:', Object.keys(configs).map(k => `${k}:${configs[k].apiKey ? '✅' : '❌'}`).join(', '));
+        
+        // 立即更新API配置显示
+        await this.refreshAPIConfigDisplay();
+        
+      } catch (error) {
+        console.error('[Settings] Failed to preload engine configs:', error);
+      }
+    }
+
+    /**
+     * 刷新API配置显示（智能显示当前引擎配置）
+     */
+    async refreshAPIConfigDisplay() {
+      try {
+        if (!this.panel || !this.isVisible) {
+          return;
+        }
+        
+        const chatEngine = this.panel.querySelector('#translationEngine')?.value;
+        const inputBoxEngine = this.panel.querySelector('#inputBoxEngine')?.value;
+        
+        // 确定当前应该显示哪个引擎的配置
+        let displayEngine = null;
+        let displayLocation = '';
+        
+        if (chatEngine !== 'google') {
+          displayEngine = chatEngine;
+          displayLocation = '聊天窗口';
+        } else if (inputBoxEngine !== 'google') {
+          displayEngine = inputBoxEngine;
+          displayLocation = '输入框';
+        }
+        
+        if (!displayEngine) {
+          console.log('[Settings] No AI engine selected, clearing API config fields');
+          this.clearAPIConfigFields();
+          return;
+        }
+        
+        console.log(`[Settings] Refreshing API config display for ${displayLocation} engine: ${displayEngine}`);
+        
+        // 确保引擎配置已加载
+        if (!this.preloadedConfigs) {
+          console.log('[Settings] No preloaded configs available, loading...');
+          await this.preloadAllEngineConfigs();
+        }
+        
+        const engineConfig = this.preloadedConfigs[displayEngine];
+        const apiKeyField = this.panel.querySelector('#apiKey');
+        const apiEndpointField = this.panel.querySelector('#apiEndpoint');
+        const apiModelField = this.panel.querySelector('#apiModel');
+        
+        if (apiKeyField && apiEndpointField && apiModelField) {
+          if (engineConfig && engineConfig.apiKey) {
+            // 显示已保存的配置
+            apiKeyField.value = engineConfig.apiKey;
+            apiModelField.value = engineConfig.model || this.getDefaultModel(displayEngine);
+            
+            if (displayEngine === 'custom') {
+              apiEndpointField.value = engineConfig.endpoint || '';
+            } else {
+              apiEndpointField.value = '';
+            }
+            
+            console.log(`[Settings] ✅ Displaying ${displayLocation} config for ${displayEngine}`);
+          } else {
+            // 清空API密钥，设置默认模型
+            apiKeyField.value = '';
+            apiModelField.value = this.getDefaultModel(displayEngine);
+            
+            if (displayEngine === 'custom') {
+              apiEndpointField.value = '';
+            } else {
+              apiEndpointField.value = '';
+            }
+            
+            console.log(`[Settings] ⚠️ No saved config for ${displayLocation} ${displayEngine}, using defaults`);
+          }
+          
+          // 添加视觉提示，显示当前显示的是哪个引擎的配置
+          this.updateAPIConfigHeader(displayLocation, displayEngine);
+        }
+        
+      } catch (error) {
+        console.error('[Settings] Failed to refresh API config display:', error);
+      }
+    }
+
+    /**
+     * 更新API配置区域标题，显示当前配置的是哪个引擎
+     */
+    updateAPIConfigHeader(location, engine) {
+      try {
+        const apiSection = this.panel.querySelector('#apiConfigSection');
+        if (!apiSection) return;
+        
+        let header = apiSection.querySelector('h3');
+        if (!header) {
+          // 如果没有h3标题，创建一个
+          header = document.createElement('h3');
+          apiSection.insertBefore(header, apiSection.firstChild);
+        }
+        
+        const engineNames = {
+          'gpt4': 'GPT-4',
+          'gemini': 'Google Gemini',
+          'deepseek': 'DeepSeek',
+          'custom': '自定义 API'
+        };
+        
+        const displayName = engineNames[engine] || engine;
+        header.innerHTML = `🔑 AI 引擎 API 配置 <small style="font-size: 12px; color: #666;">（${location}：${displayName}）</small>`;
+      } catch (error) {
+        console.error('[Settings] Failed to update API config header:', error);
       }
     }
 
@@ -3621,37 +4636,123 @@
      */
     async loadEngineConfig() {
       try {
-        const selectedEngine = this.config.global.engine;
+        const selectedEngine = this.config?.global?.engine;
         
-        // 只为 AI 引擎加载配置
-        if (!['custom', 'gpt4', 'gemini', 'deepseek'].includes(selectedEngine)) {
+        if (!selectedEngine) {
+          console.log('[Settings] No engine selected in config, skipping engine config load');
           return;
         }
         
-        const engineConfigResponse = await window.translationAPI.getEngineConfig(selectedEngine);
+        console.log(`[Settings] Loading config for engine: ${selectedEngine}`);
         
-        if (engineConfigResponse.success && engineConfigResponse.data) {
-          const engineConfig = engineConfigResponse.data;
-          
-          // 填充输入框
-          if (engineConfig.apiKey) {
-            this.panel.querySelector('#apiKey').value = engineConfig.apiKey;
-          }
-          
-          if (selectedEngine === 'custom') {
-            if (engineConfig.endpoint) {
-              this.panel.querySelector('#apiEndpoint').value = engineConfig.endpoint;
+        // 确保预加载的配置已准备就绪
+        if (!this.preloadedConfigs) {
+          console.log('[Settings] Preloading configs before loading specific engine...');
+          await this.preloadAllEngineConfigs();
+        }
+        
+        // 只为 AI 引擎加载配置
+        if (!['custom', 'gpt4', 'gemini', 'deepseek'].includes(selectedEngine)) {
+          console.log('[Settings] Google engine selected, clearing API config fields');
+          // 谷歌翻译不需要API配置，清空相关字段
+          this.clearAPIConfigFields();
+          return;
+        }
+        
+        // 使用预加载的配置
+        let engineConfig = this.preloadedConfigs?.[selectedEngine];
+        
+        if (!engineConfig) {
+          console.log(`[Settings] Config not found in preloaded, loading directly for ${selectedEngine}...`);
+          try {
+            const engineConfigResponse = await window.translationAPI.getEngineConfig(selectedEngine);
+            if (engineConfigResponse.success && engineConfigResponse.data) {
+              engineConfig = engineConfigResponse.data;
+              // 更新预加载的缓存
+              this.preloadedConfigs[selectedEngine] = engineConfig;
+              console.log(`[Settings] ✅ Directly loaded config for ${selectedEngine}`);
             }
-            if (engineConfig.model) {
-              this.panel.querySelector('#apiModel').value = engineConfig.model;
-            }
+          } catch (error) {
+            console.warn(`[Settings] Direct load failed for ${selectedEngine}:`, error);
           }
-          
-          console.log('[Settings] Loaded engine config for:', selectedEngine);
+        }
+        
+        // 显示配置到界面
+        const apiKeyField = this.panel.querySelector('#apiKey');
+        const apiEndpointField = this.panel.querySelector('#apiEndpoint');
+        const apiModelField = this.panel.querySelector('#apiModel');
+        
+        if (apiKeyField && apiModelField) {
+          if (engineConfig && engineConfig.apiKey) {
+            // 填充输入框
+            apiKeyField.value = engineConfig.apiKey;
+            apiModelField.value = engineConfig.model || this.getDefaultModel(selectedEngine);
+            
+            if (selectedEngine === 'custom' && apiEndpointField) {
+              apiEndpointField.value = engineConfig.endpoint || '';
+              console.log(`[Settings] ✅ Loaded custom config for ${selectedEngine}`);
+            }
+            
+            console.log(`[Settings] ✅ Successfully displayed engine config for: ${selectedEngine}`);
+          } else {
+            // 使用默认值
+            apiKeyField.value = '';
+            apiModelField.value = this.getDefaultModel(selectedEngine);
+            
+            if (selectedEngine === 'custom' && apiEndpointField) {
+              apiEndpointField.value = '';
+            }
+            
+            console.log(`[Settings] ⚠️ No saved config found for ${selectedEngine}, using defaults`);
+          }
+        } else {
+          console.error('[Settings] API config fields not found in panel');
         }
       } catch (error) {
-        console.error('[Settings] Failed to load engine config:', error);
+        console.error('[Settings] ❌ Failed to load engine config:', error);
+        // 出错时清空字段
+        this.clearAPIConfigFields();
       }
+    }
+
+    /**
+     * 清空API配置字段
+     */
+    clearAPIConfigFields() {
+      const apiKeyField = this.panel.querySelector('#apiKey');
+      const apiEndpointField = this.panel.querySelector('#apiEndpoint');
+      const apiModelField = this.panel.querySelector('#apiModel');
+      
+      if (apiKeyField) apiKeyField.value = '';
+      if (apiEndpointField) apiEndpointField.value = '';
+      if (apiModelField) apiModelField.value = '';
+    }
+
+    /**
+     * 获取默认模型
+     */
+    getDefaultModel(engineName) {
+      const defaultModels = {
+        'gpt4': 'gpt-4',
+        'gemini': 'gemini-pro',
+        'deepseek': 'deepseek-chat',
+        'custom': 'gpt-4'
+      };
+      return defaultModels[engineName] || 'gpt-4';
+    }
+
+    /**
+     * 设置默认引擎配置
+     */
+    setDefaultEngineConfig(engineName) {
+      const defaultModels = this.getDefaultModel(engineName);
+      this.panel.querySelector('#apiModel').value = defaultModels;
+      
+      if (engineName === 'custom') {
+        this.panel.querySelector('#apiEndpoint').value = '';
+      }
+      
+      console.log(`[Settings] Set default config for ${engineName}: model=${defaultModels}`);
     }
 
     /**
@@ -3687,6 +4788,15 @@
       
       // 更新翻译风格显示（仅 AI 引擎可用）
       this.updateTranslationStyleVisibility();
+      
+      // 更新API配置显示
+      this.updateAPIConfigVisibility();
+      // 确保配置显示正确
+      setTimeout(async () => {
+        if (this.preloadedConfigs) {
+          await this.refreshAPIConfigDisplay();
+        }
+      }, 100); // 稍微延迟以确保UI更新完成
 
       // 加载统计信息
       this.loadStats();
@@ -3699,12 +4809,15 @@
       // 翻译风格只用于输入框翻译，所以应该检查输入框引擎
       const inputBoxEngine = this.panel.querySelector('#inputBoxEngine').value;
       const styleItem = this.panel.querySelector('#translationStyle').closest('.setting-item');
+      const styleDesc = this.panel.querySelector('#translationStyle').nextElementSibling;
       
       // 只有输入框使用 AI 引擎时才显示翻译风格选项
       if (inputBoxEngine === 'google') {
         styleItem.style.display = 'none';
+        console.log('[Settings] 谷歌翻译不支持风格选项，已隐藏');
       } else {
         styleItem.style.display = 'block';
+        console.log(`[Settings] AI翻译引擎支持风格选项，已显示 (${inputBoxEngine})`);
       }
     }
 
@@ -3717,12 +4830,22 @@
       const apiSection = this.panel.querySelector('#apiConfigSection');
       const customEndpoint = this.panel.querySelector('#customEndpointItem');
       const customModel = this.panel.querySelector('#customModelItem');
+      const apiDesc = apiSection.querySelector('.setting-desc');
 
-      // 只要聊天窗口或输入框有一个使用 AI 引擎，就显示 API 配置
+      // 只有使用了AI引擎才显示API配置
       const needsAPI = chatEngine !== 'google' || inputBoxEngine !== 'google';
       
       if (needsAPI) {
         apiSection.style.display = 'block';
+        
+        // 更新描述文字
+        if (chatEngine !== 'google' && inputBoxEngine !== 'google') {
+          apiDesc.textContent = '⚠️ 需要配置 AI 引擎的 API 密钥。聊天窗口和输入框都使用了AI引擎。';
+        } else if (chatEngine !== 'google') {
+          apiDesc.textContent = '⚠️ 需要配置 AI 引擎的 API 密钥。仅聊天窗口使用了AI引擎。';
+        } else {
+          apiDesc.textContent = '⚠️ 需要配置 AI 引擎的 API 密钥。仅输入框使用了AI引擎。';
+        }
         
         // 如果任一引擎使用 custom，显示自定义端点和模型配置
         if (chatEngine === 'custom' || inputBoxEngine === 'custom') {
@@ -3732,8 +4855,11 @@
           customEndpoint.style.display = 'none';
           customModel.style.display = 'none';
         }
+        
+        console.log(`[Settings] 显示API配置: 聊天=${chatEngine}, 输入框=${inputBoxEngine}`);
       } else {
         apiSection.style.display = 'none';
+        console.log('[Settings] 隐藏API配置: 两个引擎都使用谷歌翻译');
       }
     }
 
@@ -3833,49 +4959,8 @@
         
         console.log('[Settings] Saving config for account:', accountId);
         
-        // 保存引擎配置（如果有 API 配置）
-        const selectedEngine = newConfig.global.engine;
-        const apiKey = this.panel.querySelector('#apiKey')?.value;
-        const apiEndpoint = this.panel.querySelector('#apiEndpoint')?.value;
-        const apiModel = this.panel.querySelector('#apiModel')?.value;
-        
-        console.log('[Settings] Engine config inputs:', {
-          selectedEngine,
-          apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : '(empty)',
-          apiEndpoint,
-          apiModel
-        });
-        
-        console.log('[Settings] Checking if should save engine config...');
-        console.log('[Settings] apiKey exists:', !!apiKey);
-        console.log('[Settings] selectedEngine:', selectedEngine);
-        console.log('[Settings] Is AI engine:', ['custom', 'gpt4', 'gemini', 'deepseek'].includes(selectedEngine));
-        
-        if (apiKey && (selectedEngine === 'custom' || selectedEngine === 'gpt4' || selectedEngine === 'gemini' || selectedEngine === 'deepseek')) {
-          console.log('[Settings] Saving engine config for:', selectedEngine);
-          const engineConfig = {
-            enabled: true,
-            apiKey: apiKey
-          };
-          
-          if (selectedEngine === 'custom') {
-            engineConfig.endpoint = apiEndpoint || '';
-            engineConfig.model = apiModel || 'gpt-4';
-            engineConfig.name = 'Custom API';
-          } else if (selectedEngine === 'gpt4') {
-            engineConfig.endpoint = 'https://api.openai.com/v1/chat/completions';
-            engineConfig.model = apiModel || 'gpt-4';
-          } else if (selectedEngine === 'gemini') {
-            engineConfig.endpoint = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
-            engineConfig.model = apiModel || 'gemini-pro';
-          } else if (selectedEngine === 'deepseek') {
-            engineConfig.endpoint = 'https://api.deepseek.com/v1/chat/completions';
-            engineConfig.model = apiModel || 'deepseek-chat';
-          }
-          
-          // 保存引擎配置
-          await window.translationAPI.saveEngineConfig(selectedEngine, engineConfig);
-        }
+        // 保存所有引擎配置（改进版本）
+        await this.saveAllEngineConfigs();
         
         // 保存账号配置
         const response = await window.translationAPI.saveConfig(accountId, newConfig);
@@ -3965,6 +5050,119 @@
           this.showMessage('清除缓存失败：' + error.message, 'error');
         }
       }
+    }
+
+    /**
+     * 保存所有引擎配置
+     */
+    async saveAllEngineConfigs() {
+      try {
+        const aiEngines = ['gpt4', 'gemini', 'deepseek', 'custom'];
+        const currentApiKey = this.panel.querySelector('#apiKey')?.value;
+        const currentApiEndpoint = this.panel.querySelector('#apiEndpoint')?.value;
+        const currentApiModel = this.panel.querySelector('#apiModel')?.value;
+        const currentSelectedEngine = this.panel.querySelector('#translationEngine')?.value;
+        
+        console.log('[Settings] Current API inputs:', {
+          apiKey: currentApiKey ? `${currentApiKey.substring(0, 10)}...` : '(empty)',
+          apiEndpoint: currentApiEndpoint,
+          apiModel: currentApiModel,
+          currentEngine: currentSelectedEngine
+        });
+        
+        for (const engineName of aiEngines) {
+          try {
+            // 获取已保存的配置
+            const savedConfigResponse = await window.translationAPI.getEngineConfig(engineName);
+            const savedConfig = savedConfigResponse.success ? savedConfigResponse.data : {};
+            
+            // 合并配置：优先使用当前输入的值
+            let engineConfig = {
+              enabled: true,
+              apiKey: ''
+            };
+            
+            // 如果是当前显示的引擎，使用输入框的值
+            if (engineName === currentSelectedEngine && currentApiKey && currentApiKey.trim()) {
+              engineConfig.apiKey = currentApiKey.trim();
+              
+              if (engineName === 'custom') {
+                engineConfig.endpoint = currentApiEndpoint?.trim() || savedConfig.endpoint || '';
+                engineConfig.model = currentApiModel?.trim() || savedConfig.model || 'gpt-4';
+                engineConfig.name = 'Custom API';
+              } else if (engineName === 'gpt4') {
+                engineConfig.endpoint = 'https://api.openai.com/v1/chat/completions';
+                engineConfig.model = currentApiModel?.trim() || savedConfig.model || 'gpt-4';
+              } else if (engineName === 'gemini') {
+                engineConfig.endpoint = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
+                engineConfig.model = currentApiModel?.trim() || savedConfig.model || 'gemini-pro';
+              } else if (engineName === 'deepseek') {
+                engineConfig.endpoint = 'https://api.deepseek.com/v1/chat/completions';
+                engineConfig.model = currentApiModel?.trim() || savedConfig.model || 'deepseek-chat';
+              }
+              
+              console.log(`[Settings] 💾 Saving current config for ${engineName}`);
+            } else {
+              // 对于其他引擎，保留已保存的配置
+              if (savedConfig.apiKey) {
+                engineConfig.apiKey = savedConfig.apiKey;
+                engineConfig.endpoint = savedConfig.endpoint || '';
+                engineConfig.model = savedConfig.model || this.getDefaultModel(engineName);
+                engineConfig.name = savedConfig.name;
+                
+                console.log(`[Settings] ✅ Keeping saved config for ${engineName}`);
+              } else {
+                console.log(`[Settings] ⏭️ No config for ${engineName}, skipping`);
+                continue;
+              }
+            }
+            
+            // 如果有任何配置信息，保存
+            if (engineConfig.apiKey) {
+              await window.translationAPI.saveEngineConfig(engineName, engineConfig);
+              console.log(`[Settings] ✅ Successfully saved config for ${engineName}`);
+            }
+            
+          } catch (error) {
+            console.warn(`[Settings] Failed to save config for ${engineName}:`, error);
+          }
+        }
+        
+        console.log('[Settings] ✅ All engine configs processed');
+        
+      } catch (error) {
+        console.error('[Settings] Failed to save all engine configs:', error);
+      }
+    }
+
+    /**
+     * 显示引擎切换提示
+     */
+    showEngineSwitchToast(engineName, isInputBox = false) {
+      const engineNames = {
+        'google': 'Google 翻译（免费，无需API，无风格）',
+        'gpt4': 'GPT-4（需API密钥，支持风格）',
+        'gemini': 'Google Gemini（需API密钥，支持风格）',
+        'deepseek': 'DeepSeek（需API密钥，支持风格）',
+        'custom': '自定义 API（需配置，支持风格）'
+      };
+      
+      const engineDisplayName = engineNames[engineName] || engineName;
+      const location = isInputBox ? '输入框' : '聊天窗口';
+      
+      let message = `${location}翻译引擎已切换至: ${engineDisplayName}`;
+      
+      // 根据引擎类型添加额外提示
+      if (engineName === 'google') {
+        message += '\n💡 谷歌翻译为免费机器翻译，无需配置';
+      } else {
+        message += '\n⚠️ 需要配置相应的API密钥';
+        if (isInputBox) {
+          message += '\n🎨 支持翻译风格定制';
+        }
+      }
+      
+      this.showMessage(message, 'info');
     }
 
     /**
