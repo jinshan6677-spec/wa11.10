@@ -370,7 +370,7 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
 
       // Delete account configuration
       const deleteOptions = {
-        deleteUserData: options.deleteUserData || false,
+        deleteUserData: options.deleteUserData !== false, // Default to true unless explicitly set to false
         userDataPath: options.userDataPath
       };
       

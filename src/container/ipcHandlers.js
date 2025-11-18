@@ -13,8 +13,9 @@ const AccountConfig = require('../models/AccountConfig');
  * @param {AccountConfigManager} configManager - 账号配置管理器
  * @param {InstanceManager} instanceManager - 实例管理器
  * @param {MainApplicationWindow} mainWindow - 主窗口
+ * @param {string} [userDataPath] - 用户数据路径
  */
-function registerIPCHandlers(configManager, instanceManager, mainWindow) {
+function registerIPCHandlers(configManager, instanceManager, mainWindow, userDataPath) {
   /**
    * 获取所有账号
    */
@@ -133,8 +134,19 @@ function registerIPCHandlers(configManager, instanceManager, mainWindow) {
         await instanceManager.destroyInstance(accountId);
       }
       
-      // 删除配置和数据
-      await configManager.deleteAccount(accountId);
+      // 删除配置和数据 - 默认清理用户数据
+      const deleteOptions = {
+        deleteUserData: true,
+        userDataPath: userDataPath
+      };
+      
+      const result = await configManager.deleteAccount(accountId, deleteOptions);
+      
+      if (!result.success) {
+        throw new Error(result.errors.join(', '));
+      }
+      
+      console.log(`[IPC] Account ${accountId} and associated data deleted successfully`);
       
       // 刷新主窗口
       const accounts = await configManager.loadAccounts();

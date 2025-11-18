@@ -28,6 +28,9 @@ const MigrationDialog = require('./single-window/migration/MigrationDialog');
 
 // 导入错误处理工具
 const { getErrorLogger, ErrorCategory } = require('./utils/ErrorLogger');
+
+// 导入自动清理工具
+const OrphanedDataCleaner = require('./utils/OrphanedDataCleaner');
 const { setupGlobalErrorHandlers } = require('./utils/ErrorHandler');
 
 // 全局管理器实例
@@ -486,7 +489,10 @@ app.whenReady().then(async () => {
     // 2. 初始化所有管理器
     await initializeManagers();
 
-    // 3. 注册所有 IPC 处理器
+    // 3. 执行自动数据清理
+    await performOrphanedDataCleanup();
+
+    // 4. 注册所有 IPC 处理器
     await registerAllIPCHandlers();
 
     // 4. 加载并显示账号列表
@@ -747,6 +753,53 @@ function clearError(accountId = null) {
       accountId,
       timestamp: Date.now()
     });
+  }
+}
+
+/**
+ * 执行遗留数据自动清理
+ * 在应用启动时扫描并清理已删除账号的遗留目录
+ */
+async function performOrphanedDataCleanup() {
+  try {
+    log('info', '开始执行自动数据清理...');
+
+    const userDataPath = app.getPath('userData');
+    const cleaner = new OrphanedDataCleaner({
+      userDataPath,
+      logFunction: (level, message, ...args) => log(level, `OrphanedDataCleaner: ${message}`, ...args)
+    });
+
+    // 获取当前所有账号 ID
+    const accounts = await accountConfigManager.loadAccounts();
+    const accountIds = accounts.map(acc => acc.id);
+
+    log('info', `当前账号数量: ${accounts.length}`);
+    
+    // 执行清理
+    const cleanupResult = await cleaner.scanAndClean(accountIds);
+
+    if (cleanupResult.success) {
+      log('info', `自动清理完成: 清理了 ${cleanupResult.cleaned} 个遗留目录`);
+      if (cleanupResult.details.totalSizeFreed > 0) {
+        log('info', `释放磁盘空间: ${cleanupResult.details.totalSizeFreed} 字节`);
+      }
+      
+      // 可以选择向用户报告清理结果（可选）
+      if (cleanupResult.cleaned > 0 && mainWindow && mainWindow.isReady()) {
+        mainWindow.sendToRenderer('cleanup-completed', {
+          cleaned: cleanupResult.cleaned,
+          totalSizeFreed: cleanupResult.details.totalSizeFreed,
+          message: `自动清理完成: 清理了 ${cleanupResult.cleaned} 个遗留目录，释放了 ${Math.round(cleanupResult.details.totalSizeFreed / 1024)} KB 磁盘空间`
+        });
+      }
+    } else {
+      log('warn', `自动清理完成但有错误: ${cleanupResult.errors.join(', ')}`);
+    }
+
+  } catch (error) {
+    log('error', '自动数据清理失败:', error);
+    // 不阻止应用启动，只记录错误
   }
 }
 
