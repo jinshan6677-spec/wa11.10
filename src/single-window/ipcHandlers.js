@@ -63,6 +63,11 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
   ipcMain.handle('get-accounts', async () => {
     console.log('[IPC] get-accounts handler called');
     try {
+      if (!accountManager) {
+        console.warn('[IPC] accountManager not available yet');
+        return [];
+      }
+      
       const accounts = await accountManager.getAccountsSorted();
       console.log('[IPC] get-accounts returned:', accounts.length, 'accounts');
       return accounts.map(account => account.toJSON());
@@ -666,6 +671,14 @@ function registerIPCHandlers(accountManager, viewManager, mainWindow, translatio
    */
   ipcMain.handle('account:get-active', async () => {
     try {
+      if (!viewManager || !accountManager) {
+        console.warn('[IPC] managers not available yet');
+        return {
+          success: true,
+          accountId: null
+        };
+      }
+      
       const activeAccountId = viewManager.getActiveAccountId();
       
       if (!activeAccountId) {

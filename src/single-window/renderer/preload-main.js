@@ -515,6 +515,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'window-resized',
       'account-switched',
       'account-status-changed',
+      'ipc-ready',
       'view-manager:view-loading',
       'view-manager:view-ready',
       'view-manager:view-error',

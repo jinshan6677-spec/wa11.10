@@ -46,6 +46,9 @@
     // Listen for account creation errors
     window.electronAPI.onAccountCreationError(handleAccountCreationError);
     
+    // Listen for IPC ready event
+    window.electronAPI.on('ipc-ready', handleIPCReady);
+    
     // Listen for view manager events
     window.electronAPI.on('view-manager:view-loading', handleViewLoading);
     window.electronAPI.on('view-manager:view-ready', handleViewReady);
@@ -84,10 +87,36 @@
         renderAccountList();
       } else {
         console.error('[Sidebar] electronAPI not available');
+        // 延迟重试
+        setTimeout(() => {
+          console.log('[Sidebar] Retrying loadAccounts after delay...');
+          loadAccounts();
+        }, 1000);
       }
     } catch (error) {
       console.error('[Sidebar] Failed to load accounts:', error);
-      showError('加载账号失败: ' + error.message);
+      // 检查是否是IPC处理器未注册的错误
+      if (error.message.includes('No handler registered')) {
+        console.log('[Sidebar] IPC handlers not ready yet, retrying in 1 second...');
+        setTimeout(() => {
+          loadAccounts();
+        }, 1000);
+      } else {
+        showError('加载账号失败: ' + error.message);
+      }
+    }
+  }
+
+  /**
+   * Handle IPC ready event
+   */
+  function handleIPCReady(data) {
+    console.log('[Sidebar] IPC handlers are ready:', data);
+    
+    // 当IPC就绪后，尝试加载账号
+    if (accounts.length === 0) {
+      console.log('[Sidebar] Loading accounts after IPC is ready...');
+      loadAccounts();
     }
   }
 

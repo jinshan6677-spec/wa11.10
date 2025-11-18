@@ -201,9 +201,9 @@ async function initializeManagers() {
   }
 }
 
-/**
- * 注册所有 IPC 处理器
- */
+  /**
+   * 注册所有 IPC 处理器
+   */
 async function registerAllIPCHandlers() {
   log('info', '注册 IPC 处理器...');
 
@@ -217,6 +217,12 @@ async function registerAllIPCHandlers() {
     log('info', '翻译 IPC 处理器注册完成');
 
     log('info', '所有 IPC 处理器注册完成');
+
+    // 通知渲染进程IPC已就绪
+    if (mainWindow && mainWindow.getWindow()) {
+      mainWindow.sendToRenderer('ipc-ready', { success: true });
+      log('info', 'IPC就绪通知已发送');
+    }
   } catch (error) {
     log('error', 'IPC 处理器注册失败:', error);
     throw error;
